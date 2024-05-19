@@ -53,3 +53,7 @@ btrbkar restore NAME DEST
 -b BACKEND
 --no-prune only rir `bbkar`
 SNAPSHOT_PREFIX , `_btrbk_snapshots/NAME`
+
+## bbl
+
+The idea is inspired by [this comment](https://github.com/digint/btrbk/issues/123#issuecomment-1114320750), [btrfs-send-to-s3](https://github.com/kubrickfr/btrfs-send-to-s3) and others.
