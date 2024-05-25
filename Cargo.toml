@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 opendal = "0.46.0"
+subprocess = "0.2.9"
