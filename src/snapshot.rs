@@ -1,5 +1,4 @@
-struct Snapshot {
-    // _btrbk_snapshots: &str,
+pub struct Snapshot {
+    pub  _btrbk_snapshots: String,
+    pub volume: String,
 }
-
-
