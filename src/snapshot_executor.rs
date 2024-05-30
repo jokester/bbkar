@@ -18,7 +18,7 @@ impl SnapshotConfig {
             .iter()
             .filter_map(|pathbuf| Snapshot::from_pathbuf(pathbuf))
             .collect();
-        return Ok(entries.clone()).cloned();
+        return Ok(entries);
     }
     fn read_snapshot(&self, s: Snapshot, parent: Option<Snapshot>) {
         todo!()
