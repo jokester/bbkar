@@ -1,17 +1,16 @@
-use crate::snapshot::{Snapshot, SnapshotTimestamp};
-use std::path::{Path, PathBuf};
+use crate::snapshot::{Snapshot};
+use std::path::{PathBuf};
 use std::{fs, io};
-use subprocess::{Exec, Result as SResult};
 
 pub struct SnapshotConfig {
-    snapshot_dir: Path,
+    pub snapshot_dir: PathBuf,
 }
 
 impl SnapshotConfig {
-    fn list_snapshot(&self) -> io::Result<Vec<Snapshot>> {
+    pub fn list_snapshot(&self) -> io::Result<Vec<Snapshot>> {
         // let c = fs::read_dir(&self.snapshot_dir)?.map(Snapshot::from_string);
         // let children =  self.snapshot_dir.read_dir()?.map(Snapshot::from_string).collect::<Result<Vec<_>, io::Error>>();
-        let entries: Vec<PathBuf> = fs::read_dir(&self.snapshot_dir)?
+        let entries: Vec<PathBuf> = fs::read_dir(&self.snapshot_dir.as_path())?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, io::Error>>()?;
         let entries: Vec<Snapshot> = entries
