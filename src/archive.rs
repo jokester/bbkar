@@ -1,2 +1,1 @@
-pub struct Archive {
-}
+pub struct Archive {}
