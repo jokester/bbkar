@@ -1,5 +1,5 @@
-use crate::snapshot::{Snapshot};
-use std::path::{PathBuf};
+use crate::snapshot::Snapshot;
+use std::path::PathBuf;
 use std::{fs, io};
 
 pub struct SnapshotConfig {

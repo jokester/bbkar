@@ -1,0 +1,4 @@
+[gcs]
+snapshots_dir = "/media/data-root/_btrbk_snaps"
+#volumes = [""]
+archive_prefix = "/btrbk-gcs/"
