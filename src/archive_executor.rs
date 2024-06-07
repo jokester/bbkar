@@ -1,22 +1,42 @@
 use crate::archive::Archive;
 use crate::snapshot::Snapshot;
-use opendal::Scheme;
+use opendal::{Scheme, layers, BlockingOperator};
 use opendal::{Operator, Result as R};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-struct ArchiveManager {}
-
-impl ArchiveManager {
-    fn build_operator(scheme_name: &str, args: HashMap<String, String>) -> R<Operator> {
-        let scheme = scheme_name.parse::<Scheme>()?;
-        let op = Operator::via_map(scheme, args)?;
-        Ok(op)
-    }
+#[derive(Clone)]
+struct ArchiveManagerConf {
+    service: String,
+    service_args: HashMap<String, String>,
+    path_prefix: String
 }
 
-pub trait ArchiveExecutor {
-    fn list_archive() -> R<Vec<Archive>>;
-    fn save_snapshot(s: Snapshot, parent: Option<Snapshot>) -> R<()>;
-    fn load_archive(a: Archive, dest: &PathBuf /* TODO: options */);
+struct ArchiveManager {
+    op: BlockingOperator,
+    conf: ArchiveManagerConf
+}
+
+impl ArchiveManager {
+    fn new(conf: ArchiveManagerConf) -> R<ArchiveManager> {
+        let scheme = conf.service.parse::<Scheme>()?;
+        let op = Operator::via_map(scheme, conf.service_args.clone())?.layer(layers::LoggingLayer::default()).blocking();
+        Ok(ArchiveManager {op, conf})
+    }
+
+    fn list_archive(&self) -> R<Vec<Archive>> {
+        todo!()
+    }
+
+    fn load_archive(a: Archive, dest: &PathBuf /* TODO: options */) {
+        todo!()
+    }
+
+    fn save_snapshot(s: Snapshot, parent: Option<Snapshot>) -> R<()> {
+        todo!()
+    }
+
+    fn ranged_read(&self) {
+        let f = self.op.read_with("path").range(0..1024).call()?;
+    }
 }
