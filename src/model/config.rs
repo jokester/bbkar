@@ -110,13 +110,13 @@ impl BbkarConfigFile {
                     name, sync.min_full_send_interval
                 ));
             }
-            if let Some(depth) = sync.max_incremental_depth {
-                if depth < 1 {
-                    errors.push(format!(
-                        "sync.{}.max_incremental_depth must be >= 1, got {}",
-                        name, depth
-                    ));
-                }
+            if let Some(depth) = sync.max_incremental_depth
+                && depth < 1
+            {
+                errors.push(format!(
+                    "sync.{}.max_incremental_depth must be >= 1, got {}",
+                    name, depth
+                ));
             }
             // validate retention policy fields
             if sync.archive_preserve_min != "all"
@@ -127,13 +127,13 @@ impl BbkarConfigFile {
                     name, sync.archive_preserve_min
                 ));
             }
-            if let Some(ref schedule) = sync.archive_preserve {
-                if PreserveSchedule::parse(schedule).is_none() {
-                    errors.push(format!(
-                        "sync.{}.archive_preserve: invalid schedule \"{}\"",
-                        name, schedule
-                    ));
-                }
+            if let Some(ref schedule) = sync.archive_preserve
+                && PreserveSchedule::parse(schedule).is_none()
+            {
+                errors.push(format!(
+                    "sync.{}.archive_preserve: invalid schedule \"{}\"",
+                    name, schedule
+                ));
             }
             if Weekday::parse(&sync.preserve_day_of_week).is_none() {
                 errors.push(format!(

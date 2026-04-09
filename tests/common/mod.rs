@@ -21,6 +21,7 @@ impl PrintedOutput {
         self.0.lock().unwrap().clone()
     }
 
+    #[allow(dead_code)]
     pub fn text(&self) -> String {
         self.lines().join("\n")
     }

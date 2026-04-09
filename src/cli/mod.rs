@@ -128,10 +128,10 @@ fn for_each_sync(
     let mut source_cache: HashMap<&str, HashMap<String, SourceState>> = HashMap::new();
 
     for (sync_name, sync_spec) in config.sync.iter() {
-        if let Some(name) = sync_name_filter {
-            if sync_name != name {
-                continue;
-            }
+        if let Some(name) = sync_name_filter
+            && sync_name != name
+        {
+            continue;
         }
         executor.print_info(&format!("[sync.{}]", sync_name));
         let src_spec = &config.source[&sync_spec.source];
