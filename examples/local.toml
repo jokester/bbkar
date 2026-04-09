@@ -13,11 +13,9 @@ filter = ["*"]
 
 # driver: the type of the storage backend.
 # "local" means or local filesystem. Other options are "s3" "gcs"
-driver = "gcs"
-bucket = "temp-bbkar-test-20260409"
+driver = "local"
 # path: a directory-ish in filesystem or bucket-ish. Must be absolute path.
-path = 'test-20260409-2'
-credential_path = "./temp/temp-bbkar-test-0931e60e0356.json"
+path = '/media/sata-256g/bbkar-temp/'
 
 
 [sync.1]

@@ -1,0 +1,61 @@
+use crate::model::config::SyncSpec;
+use crate::utils::duration::{CalendarDuration, PreserveSchedule, Weekday};
+
+/// Controls how new snapshots are sent (full vs incremental).
+#[derive(Debug, Clone)]
+pub struct SendPolicy {
+    pub min_full_send_interval: CalendarDuration,
+    /// None means no depth limit.
+    pub max_incremental_depth: Option<u32>,
+}
+
+/// Controls which archives are kept during pruning.
+#[derive(Debug, Clone)]
+pub struct RetentionPolicy {
+    /// None means "all" (keep everything).
+    pub archive_preserve_min: Option<CalendarDuration>,
+    pub archive_preserve: Option<PreserveSchedule>,
+    pub preserve_day_of_week: Weekday,
+}
+
+/// Fully resolved policy parsed from SyncSpec config strings.
+#[derive(Debug, Clone)]
+pub struct ResolvedSyncPolicy {
+    pub send: SendPolicy,
+    pub retention: RetentionPolicy,
+}
+
+impl ResolvedSyncPolicy {
+    /// Resolve raw config strings into parsed policy types.
+    /// Called after validation, so unwraps on parse are safe.
+    pub fn from_sync_spec(spec: &SyncSpec) -> Self {
+        let archive_preserve = spec
+            .archive_preserve
+            .as_ref()
+            .and_then(|s| PreserveSchedule::parse(s));
+
+        // Safe to unwrap: validated in from_toml()
+        let min_full_send_interval = CalendarDuration::parse(&spec.min_full_send_interval).unwrap();
+
+        let archive_preserve_min = if spec.archive_preserve_min == "all" {
+            None
+        } else {
+            CalendarDuration::parse(&spec.archive_preserve_min)
+        };
+
+        let preserve_day_of_week =
+            Weekday::parse(&spec.preserve_day_of_week).unwrap_or(Weekday::Sunday);
+
+        ResolvedSyncPolicy {
+            send: SendPolicy {
+                min_full_send_interval,
+                max_incremental_depth: spec.max_incremental_depth,
+            },
+            retention: RetentionPolicy {
+                archive_preserve_min,
+                archive_preserve,
+                preserve_day_of_week,
+            },
+        }
+    }
+}

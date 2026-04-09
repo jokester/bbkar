@@ -1,0 +1,66 @@
+# Example: archive in a local filesystem, with all poss
+[global]
+# max size for a single backup file, in MB
+# default: 256
+max_backup_chunk_size = 128
+
+# compression algorithm to use. Only affects newly created backup file.
+# default: 'zstd'
+compression = 'zstd'
+
+
+
+[source.data-root]
+# a "source" block, specifying source subvolumes location. Must be absolute path.
+path = "/media/data-root/_btrbk_snap"
+# patterns to limit subvolume names (the orig name without the timestamp suffix)
+# "*" "?" wildcard supported. Specifying multiple patterns will backup the union of the them.
+# default: ['*']
+filter = ['bbkar-test-empty']
+
+
+[dest.local-dir]
+# a "dest" block, specifying backup location
+
+# driver: the type of the storage backend.
+# "local" means or local filesystem. Other options are "s3" "gcs"
+driver = "local"
+# path: a directory-ish in filesystem or bucket-ish. Must be absolute path.
+path = '/media/sys-root/home-mono.nobackup/bbkar-output'
+
+# TODO: creds, buckets
+[dest.example-s3]
+driver = "s3"
+bucket = "the-bucket"
+path = '/key-prefix'
+region = "us-east-1"
+endpoint = "https://s3.us-east-1.amazonaws.com"
+# Optional. When omitted, bbkar/OpenDAL will fall back to AWS default credential loading
+# from environment variables and shared files like ~/.aws/credentials and ~/.aws/config.
+access_key_id = "AKIA..."
+secret_access_key = "..."
+# Set this to true to disable loading AWS credentials/config from default locations.
+disable_config_load = false
+
+[dest.example-gcs]
+driver = "gcs"
+bucket = "the-bucket"
+path = '/key-prefix'
+
+[sync.1]
+# a "sync" block connects a source to a dest
+source = "data-root"
+dest = "local-dir"
+
+# setting "filter" here to limit the subvolumes to sync.
+# defaults to be ['*'], meaning all subvolumes from the source
+# This option is applied after the source's "filter" option.
+filter = ['bbkar-test-empty']
+
+[sync.2]
+source = "data-root"
+dest = "example-s3"
+
+[sync.3]
+source = "data-root"
+dest = "example-gcs"
