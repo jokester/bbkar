@@ -10,6 +10,7 @@ use crate::model::plan::{PrunePlan, RestorePlan, RunPlan};
 use crate::model::policy::{RetentionPolicy, SendPolicy};
 use crate::model::source::Timestamp;
 use crate::service::executor::inspect_source::SourceState;
+use crate::service::planner::time::DayNumber;
 
 /**
  * A planner provides the strategy to sync source and destination
@@ -51,7 +52,7 @@ impl Planner {
         &self,
         meta: Option<&DestMeta>,
         retention_policy: &RetentionPolicy,
-        now_days: i64,
+        now_days: DayNumber,
     ) -> PrunePlan {
         prune::build_prune_plan_at(meta, retention_policy, now_days)
     }
@@ -64,7 +65,7 @@ mod tests {
     use crate::model::dest::{DestMeta, VolumeArchive};
     use crate::model::plan::{PruneReason, PruneStep, RunStep};
     use crate::model::source::{Series, Timestamp};
-    use crate::service::planner::time::day_number_from_ymd;
+    use crate::service::planner::time::DayNumber;
     use crate::utils::duration::{CalendarDuration, Weekday};
 
     fn snap(name: &str) -> Timestamp {
@@ -351,7 +352,8 @@ mod tests {
                 },
             ],
         );
-        let plan = planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), day_number_from_ymd(2023, 1, 10));
+        let plan =
+            planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), DayNumber::from_ymd(2023, 1, 10));
 
         assert!(matches!(plan.steps.first(), Some(PruneStep::CommitMetadata(_))));
         assert!(matches!(plan.steps.get(1), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230101"));
@@ -370,7 +372,8 @@ mod tests {
                 chunks: vec![],
             }],
         );
-        let plan = planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), day_number_from_ymd(2023, 1, 10));
+        let plan =
+            planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), DayNumber::from_ymd(2023, 1, 10));
 
         assert_eq!(plan.pruned_count(), 0);
         assert!(matches!(plan.decisions[0].reason, PruneReason::KeepAll));
@@ -388,7 +391,8 @@ mod tests {
                 chunks: vec![],
             }],
         );
-        let plan = planner.build_prune_plan_at(Some(&meta), &retention_policy_all(), day_number_from_ymd(2023, 1, 10));
+        let plan =
+            planner.build_prune_plan_at(Some(&meta), &retention_policy_all(), DayNumber::from_ymd(2023, 1, 10));
 
         assert!(plan.steps.is_empty());
         assert_eq!(plan.kept_count(), 1);

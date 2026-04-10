@@ -146,5 +146,5 @@ fn check_interval_exceeded(
     let Some(current_days) = parse_date_to_days(current.timestamp()) else {
         return true;
     };
-    (current_days - last_days) >= interval.days as i64
+    (current_days.into_inner() - last_days.into_inner()) >= interval.days as i64
 }

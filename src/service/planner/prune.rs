@@ -5,16 +5,16 @@ use crate::model::plan::{PruneDecision, PrunePlan, PruneReason, PruneStep};
 use crate::model::policy::RetentionPolicy;
 use crate::utils::duration::{PreserveCount, TimeUnit, Weekday};
 
-use super::time::{current_day_number, day_number_from_ymd, parse_timestamp_ymd};
+use super::time::{DayNumber, parse_timestamp_ymd};
 
 pub(crate) fn build_prune_plan(meta: Option<&DestMeta>, retention_policy: &RetentionPolicy) -> PrunePlan {
-    build_prune_plan_at(meta, retention_policy, current_day_number())
+    build_prune_plan_at(meta, retention_policy, DayNumber::today())
 }
 
 pub(crate) fn build_prune_plan_at(
     meta: Option<&DestMeta>,
     retention_policy: &RetentionPolicy,
-    now_days: i64,
+    now_days: DayNumber,
 ) -> PrunePlan {
     let Some(meta) = meta else {
         return PrunePlan {
@@ -53,7 +53,7 @@ pub(crate) fn build_prune_plan_at(
             };
             Some(ArchiveInfo {
                 archive,
-                day_number: day_number_from_ymd(year, month, day),
+                day_number: DayNumber::from_ymd(year, month, day),
                 year,
                 month,
             })
@@ -67,7 +67,7 @@ pub(crate) fn build_prune_plan_at(
         .unwrap_or(0);
 
     for info in &archive_infos {
-        if now_days - info.day_number < keep_min_days {
+        if now_days.into_inner() - info.day_number.into_inner() < keep_min_days {
             reasons.insert(info.archive.timestamp.raw().to_string(), PruneReason::TooNew);
         }
     }
@@ -96,7 +96,7 @@ pub(crate) fn build_prune_plan_at(
 
 struct ArchiveInfo<'a> {
     archive: &'a VolumeArchive,
-    day_number: i64,
+    day_number: DayNumber,
     year: i64,
     month: i64,
 }
@@ -107,7 +107,7 @@ fn apply_schedule_bucket(
     unit: TimeUnit,
     count: &PreserveCount,
     preserve_day_of_week: Weekday,
-    now_days: i64,
+    now_days: DayNumber,
 ) {
     let current_period = current_period_key(now_days, unit, preserve_day_of_week);
     let mut earliest_per_period: HashMap<i64, &ArchiveInfo<'_>> = HashMap::new();
@@ -146,31 +146,31 @@ fn apply_schedule_bucket(
 
 fn period_key_for_archive(info: &ArchiveInfo<'_>, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
     match unit {
-        TimeUnit::Day => info.day_number,
+        TimeUnit::Day => info.day_number.into_inner(),
         TimeUnit::Week => period_key_from_day(info.day_number, unit, preserve_day_of_week),
         TimeUnit::Month => info.year * 12 + (info.month - 1),
         TimeUnit::Year => info.year,
     }
 }
 
-fn period_key_from_day(day_number: i64, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
+fn period_key_from_day(day_number: DayNumber, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
     match unit {
-        TimeUnit::Day => day_number,
+        TimeUnit::Day => day_number.into_inner(),
         TimeUnit::Week => {
             let weekday = weekday_from_day_number(day_number);
             let start = weekday_index(preserve_day_of_week);
             let offset = (weekday - start).rem_euclid(7);
-            (day_number - offset) / 7
+            (day_number.into_inner() - offset) / 7
         }
         TimeUnit::Month | TimeUnit::Year => unreachable!("month/year period requires parsed Y/M"),
     }
 }
 
-fn current_period_key(now_days: i64, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
+fn current_period_key(now_days: DayNumber, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
     match unit {
         TimeUnit::Day | TimeUnit::Week => period_key_from_day(now_days, unit, preserve_day_of_week),
         TimeUnit::Month | TimeUnit::Year => {
-            let timestamp = current_day_timestamp(now_days);
+            let timestamp = now_days.to_ymd_string();
             let (year, month, _day) = parse_timestamp_ymd(&timestamp).expect("current day should be representable");
             match unit {
                 TimeUnit::Month => year * 12 + (month - 1),
@@ -181,22 +181,8 @@ fn current_period_key(now_days: i64, unit: TimeUnit, preserve_day_of_week: Weekd
     }
 }
 
-fn current_day_timestamp(now_days: i64) -> String {
-    let z = now_days + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + if m <= 2 { 1 } else { 0 };
-    format!("{year:04}{m:02}{d:02}")
-}
-
-fn weekday_from_day_number(day_number: i64) -> i64 {
-    (day_number + 3).rem_euclid(7)
+fn weekday_from_day_number(day_number: DayNumber) -> i64 {
+    (day_number.into_inner() + 3).rem_euclid(7)
 }
 
 fn weekday_index(weekday: Weekday) -> i64 {
