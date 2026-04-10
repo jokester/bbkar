@@ -109,7 +109,7 @@ fn apply_schedule_bucket(
     preserve_day_of_week: Weekday,
     now_days: i64,
 ) {
-    let current_period = period_key_from_day(now_days, unit, preserve_day_of_week);
+    let current_period = current_period_key(now_days, unit, preserve_day_of_week);
     let mut earliest_per_period: HashMap<i64, &ArchiveInfo<'_>> = HashMap::new();
 
     for info in archives {
@@ -164,6 +164,35 @@ fn period_key_from_day(day_number: i64, unit: TimeUnit, preserve_day_of_week: We
         }
         TimeUnit::Month | TimeUnit::Year => unreachable!("month/year period requires parsed Y/M"),
     }
+}
+
+fn current_period_key(now_days: i64, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
+    match unit {
+        TimeUnit::Day | TimeUnit::Week => period_key_from_day(now_days, unit, preserve_day_of_week),
+        TimeUnit::Month | TimeUnit::Year => {
+            let timestamp = current_day_timestamp(now_days);
+            let (year, month, _day) = parse_timestamp_ymd(&timestamp).expect("current day should be representable");
+            match unit {
+                TimeUnit::Month => year * 12 + (month - 1),
+                TimeUnit::Year => year,
+                TimeUnit::Day | TimeUnit::Week => unreachable!(),
+            }
+        }
+    }
+}
+
+fn current_day_timestamp(now_days: i64) -> String {
+    let z = now_days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    format!("{year:04}{m:02}{d:02}")
 }
 
 fn weekday_from_day_number(day_number: i64) -> i64 {

@@ -56,6 +56,22 @@ impl RetentionPolicy {
     }
 }
 
+impl SendPolicy {
+    pub fn describe(&self) -> String {
+        let mut parts = vec![format!(
+            "full at least every {}",
+            format_calendar_days(self.min_full_send_interval.days)
+        )];
+
+        match self.max_incremental_depth {
+            Some(depth) => parts.push(format!("max incremental depth {}", depth)),
+            None => parts.push("no incremental depth limit".to_string()),
+        }
+
+        parts.join(", ")
+    }
+}
+
 /// Fully resolved policy parsed from SyncSpec config strings.
 #[derive(Debug, Clone)]
 pub struct ResolvedSyncPolicy {

@@ -41,6 +41,7 @@ pub fn status(config_path: &Path, name: Option<&str>, executor: Box<dyn Executor
             "remote usage",
             super::ArchiveStats::from_meta(dest_state.meta.as_ref()),
         );
+        executor.print_info(&format!("    send policy: {}", ctx.send_policy.describe()));
         executor.print_info(&format!(
             "    retention: {}",
             ctx.retention_policy.describe()

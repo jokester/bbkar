@@ -91,6 +91,21 @@ fn test_status_basic() {
         "expected aggregate remote archive stats in output, got:\n{}",
         text
     );
+    assert!(
+        text.contains("send policy: full at least every 1w, no incremental depth limit"),
+        "expected default send policy in output, got:\n{}",
+        text
+    );
+    assert!(
+        text.contains("retention: keep all archives"),
+        "expected default retention policy in output, got:\n{}",
+        text
+    );
+    assert!(
+        text.contains("next prune: keep 2 archive(s), prune 0 archive(s), required ancestor 0 archive(s)"),
+        "expected next prune summary in output, got:\n{}",
+        text
+    );
 }
 
 #[test]
@@ -137,6 +152,63 @@ fn test_status_empty_dest() {
     assert!(
         text.contains("remote usage: 0 archives, 0 bytes (full: 0 archives, 0 bytes; incremental: 0 archives, 0 bytes)"),
         "expected zero remote archive stats in output, got:\n{}",
+        text
+    );
+    assert!(
+        text.contains("next prune: keep 0 archive(s), prune 0 archive(s), required ancestor 0 archive(s)"),
+        "expected empty next prune summary in output, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn test_status_prints_non_default_policies() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let mut sources = HashMap::new();
+    sources.insert(
+        "myvol".to_string(),
+        source_state("myvol", &["20230101", "20230102", "20230103"]),
+    );
+
+    let mut dests = HashMap::new();
+    dests.insert("myvol".to_string(), dest_with(&["20230101", "20230102"]));
+
+    let config_path = common::write_config_file(
+        &tmp,
+        r#"[global]
+
+[source.src1]
+path = "/fake/source"
+
+[dest.dst1]
+driver = "local"
+path = "/fake/dest"
+
+[sync.main]
+source = "src1"
+dest = "dst1"
+filter = ["myvol"]
+min_full_send_interval = "30d"
+max_incremental_depth = 5
+archive_preserve_min = "7d"
+archive_preserve = "30d 12w 6m *y"
+preserve_day_of_week = "monday"
+"#,
+    );
+
+    let (executor, output) = common::MockExecutor::new(sources, dests, 0);
+    bbkar::cli::status(&config_path, None, Box::new(executor)).unwrap();
+
+    let text = output.text();
+    assert!(
+        text.contains("send policy: full at least every 1m, max incremental depth 5"),
+        "expected custom send policy in output, got:\n{}",
+        text
+    );
+    assert!(
+        text.contains("retention: keep all archives for 1w, then preserve 30d 12w 6m *y (week anchor: monday)"),
+        "expected custom retention policy in output, got:\n{}",
         text
     );
 }

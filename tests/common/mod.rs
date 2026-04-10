@@ -195,3 +195,11 @@ filter = [{filter}]
     f.write_all(content.as_bytes()).unwrap();
     path
 }
+
+#[allow(dead_code)]
+pub fn write_config_file(dir: &tempfile::TempDir, content: &str) -> PathBuf {
+    let path = dir.path().join("config.toml");
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(content.as_bytes()).unwrap();
+    path
+}
