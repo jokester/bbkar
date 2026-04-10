@@ -72,12 +72,16 @@ where
     }
 }
 
-pub fn init_tracing(verbose: u8) {
-    let level = match verbose {
+fn level_filter_for_verbosity(verbose: u8) -> LevelFilter {
+    match verbose {
         0 => LevelFilter::INFO,
         1 => LevelFilter::DEBUG,
         _ => LevelFilter::TRACE,
-    };
+    }
+}
+
+pub fn init_tracing(verbose: u8) {
+    let level = level_filter_for_verbosity(verbose);
 
     tracing_subscriber::fmt()
         .with_max_level(level)
@@ -86,4 +90,17 @@ pub fn init_tracing(verbose: u8) {
         .with_ansi(atty::is(atty::Stream::Stderr))
         .event_format(BbkarEventFormat)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_level_filter_for_verbosity() {
+        assert_eq!(level_filter_for_verbosity(0), LevelFilter::INFO);
+        assert_eq!(level_filter_for_verbosity(1), LevelFilter::DEBUG);
+        assert_eq!(level_filter_for_verbosity(2), LevelFilter::TRACE);
+        assert_eq!(level_filter_for_verbosity(9), LevelFilter::TRACE);
+    }
 }

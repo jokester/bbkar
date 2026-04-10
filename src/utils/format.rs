@@ -98,4 +98,10 @@ mod tests {
         assert_eq!(format_time_unit(TimeUnit::Month), "m");
         assert_eq!(format_weekday(Weekday::Sunday), "sunday");
     }
+
+    #[test]
+    fn test_format_speed() {
+        assert_eq!(format_speed(2048, Duration::from_secs(2)), "1.00 KiB/s");
+        assert_eq!(format_speed(2048, Duration::from_nanos(1)), "N/A");
+    }
 }

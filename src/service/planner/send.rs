@@ -148,3 +148,77 @@ fn check_interval_exceeded(
     };
     (current_days.into_inner() - last_days.into_inner()) >= interval.days as i64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::config::BackendSpec;
+    use crate::model::dest::DestMeta;
+    use crate::model::source::Series;
+    use crate::utils::duration::CalendarDuration;
+
+    fn snap(name: &str) -> Timestamp {
+        Timestamp::parse(name).unwrap()
+    }
+
+    fn src(names: &[&str]) -> SourceState {
+        SourceState {
+            volume: Series::new("test".to_string(), names.iter().map(|n| snap(n)).collect()),
+        }
+    }
+
+    fn dest_spec() -> DestSpec {
+        DestSpec {
+            backend_spec: BackendSpec::Local {
+                path: "/tmp/test".to_string(),
+            },
+        }
+    }
+
+    fn policy(interval_days: u32, max_depth: Option<u32>) -> SendPolicy {
+        SendPolicy {
+            min_full_send_interval: CalendarDuration { days: interval_days },
+            max_incremental_depth: max_depth,
+        }
+    }
+
+    #[test]
+    fn test_build_send_plan_forces_full_when_existing_chain_has_no_full_anchor() {
+        let src = src(&["20230102", "20230103"]);
+        let dest_state = DestState {
+            meta: Some(DestMeta::new(
+                0,
+                0,
+                vec![VolumeArchive {
+                    timestamp: snap("20230102"),
+                    parent_timestamp: Some("missing-parent".to_string()),
+                    chunks: vec![],
+                }],
+            )),
+        };
+
+        let plan = build_send_plan("vol", &src, &dest_spec(), &dest_state, &policy(365, None)).unwrap();
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(&plan.steps[0], RunStep::SendFull(ts) if ts.raw() == "20230103"));
+    }
+
+    #[test]
+    fn test_build_send_plan_forces_full_when_timestamp_cannot_be_parsed_for_interval_check() {
+        let src = src(&["badstamp1", "badstamp2"]);
+        let dest_state = DestState {
+            meta: Some(DestMeta::new(
+                0,
+                0,
+                vec![VolumeArchive {
+                    timestamp: snap("badstamp1"),
+                    parent_timestamp: None,
+                    chunks: vec![],
+                }],
+            )),
+        };
+
+        let plan = build_send_plan("vol", &src, &dest_spec(), &dest_state, &policy(7, None)).unwrap();
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(&plan.steps[0], RunStep::SendFull(ts) if ts.raw() == "badstamp2"));
+    }
+}

@@ -59,3 +59,52 @@ impl From<opendal::Error> for BbkarError {
         BbkarError::OpenDal(value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_display_variants() {
+        assert_eq!(
+            BbkarError::Config(vec!["bad config".to_string()]).to_string(),
+            "Configuration Error: [\n    \"bad config\",\n]"
+        );
+        assert_eq!(BbkarError::Plan("bad plan".to_string()).to_string(), "Plan Error: bad plan");
+        assert_eq!(
+            BbkarError::Execution("bad exec".to_string()).to_string(),
+            "Execution Error: bad exec"
+        );
+        assert_eq!(
+            BbkarError::InvalidSourcePath("/bad".to_string()).to_string(),
+            "Invalid source path: /bad"
+        );
+        assert_eq!(
+            BbkarError::OtherError("misc".to_string()).to_string(),
+            "Other Error: misc"
+        );
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let err: BbkarError = io::Error::other("boom").into();
+        assert!(matches!(err, BbkarError::Io(_)));
+        assert!(err.to_string().contains("IO Error: boom"));
+    }
+
+    #[test]
+    fn test_from_toml_error() {
+        let err = toml::from_str::<toml::Value>("not = [valid").unwrap_err();
+        let err: BbkarError = err.into();
+        assert!(matches!(err, BbkarError::Toml(_)));
+        assert!(err.to_string().contains("TOML Error:"));
+    }
+
+    #[test]
+    fn test_from_yaml_error() {
+        let err = serde_yaml::from_str::<serde_yaml::Value>("key: [").unwrap_err();
+        let err: BbkarError = err.into();
+        assert!(matches!(err, BbkarError::Yaml(_)));
+        assert!(err.to_string().contains("YAML Error:"));
+    }
+}

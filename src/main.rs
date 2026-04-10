@@ -7,15 +7,19 @@ use tracing::error;
 
 use bbkar::cli::Cli;
 
-fn main() -> BR<()> {
-    let config_count = std::env::args()
+fn count_config_args(args: impl IntoIterator<Item = String>) -> usize {
+    args.into_iter()
         .filter(|a| {
             a == "--config"
                 || a == "-c"
                 || a.starts_with("--config=")
                 || (a.starts_with("-c") && a.len() > 2 && !a.starts_with("--"))
         })
-        .count();
+        .count()
+}
+
+fn main() -> BR<()> {
+    let config_count = count_config_args(std::env::args());
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
@@ -83,4 +87,50 @@ fn main() -> BR<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_config_args;
+
+    #[test]
+    fn test_count_config_args_variants() {
+        assert_eq!(
+            count_config_args(vec!["bbkar".to_string(), "--config".to_string(), "a.toml".to_string()]),
+            1
+        );
+        assert_eq!(
+            count_config_args(vec!["bbkar".to_string(), "--config=a.toml".to_string()]),
+            1
+        );
+        assert_eq!(
+            count_config_args(vec!["bbkar".to_string(), "-c".to_string(), "a.toml".to_string()]),
+            1
+        );
+        assert_eq!(
+            count_config_args(vec!["bbkar".to_string(), "-ca.toml".to_string()]),
+            1
+        );
+    }
+
+    #[test]
+    fn test_count_config_args_ignores_non_config_args() {
+        assert_eq!(
+            count_config_args(vec![
+                "bbkar".to_string(),
+                "--check".to_string(),
+                "--color=always".to_string(),
+                "-v".to_string(),
+            ]),
+            0
+        );
+        assert_eq!(
+            count_config_args(vec![
+                "bbkar".to_string(),
+                "--config=a.toml".to_string(),
+                "-cb.toml".to_string(),
+            ]),
+            2
+        );
+    }
 }

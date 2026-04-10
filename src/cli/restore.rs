@@ -339,3 +339,66 @@ fn resolve_targets(
     targets.sort();
     Ok(targets)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::dest::VolumeArchive;
+
+    fn snap(name: &str) -> Timestamp {
+        Timestamp::parse(name).unwrap()
+    }
+
+    fn archive(name: &str, parent: Option<&str>) -> VolumeArchive {
+        VolumeArchive {
+            timestamp: snap(name),
+            parent_timestamp: parent.map(str::to_string),
+            chunks: vec![],
+        }
+    }
+
+    #[test]
+    fn test_resolve_targets_defaults_to_latest() {
+        let archives = vec![archive("20230101", None), archive("20230103", Some("20230101"))];
+        let targets = resolve_targets(&archives, &[], None, None).unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].raw(), "20230103");
+    }
+
+    #[test]
+    fn test_resolve_targets_combines_explicit_and_range_without_duplicates() {
+        let archives = vec![
+            archive("20230101", None),
+            archive("20230102", Some("20230101")),
+            archive("20230103", Some("20230102")),
+        ];
+        let snapshots = vec!["20230103".to_string(), "20230102".to_string()];
+        let targets =
+            resolve_targets(&archives, &snapshots, Some("20230102"), Some("20230103")).unwrap();
+
+        assert_eq!(targets.iter().map(|t| t.raw()).collect::<Vec<_>>(), vec!["20230102", "20230103"]);
+    }
+
+    #[test]
+    fn test_resolve_targets_errors_for_missing_snapshot() {
+        let archives = vec![archive("20230101", None)];
+        let err = match resolve_targets(&archives, &["20230102".to_string()], None, None) {
+            Ok(_) => panic!("expected missing snapshot error"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, BbkarError::Execution(msg) if msg.contains("snapshot '20230102' not found")));
+    }
+
+    #[test]
+    fn test_resolve_targets_errors_for_empty_range_match() {
+        let archives = vec![archive("20230101", None)];
+        let err = match resolve_targets(&archives, &[], Some("20230102"), Some("20230103")) {
+            Ok(_) => panic!("expected empty range error"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, BbkarError::Execution(msg) if msg.contains("no archives match")));
+    }
+}

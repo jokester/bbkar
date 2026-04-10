@@ -63,3 +63,21 @@ pub(crate) fn day_number_from_ymd(year: i64, month: i64, day: i64) -> i64 {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146097 + doe - 719468
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_day_number_round_trip_to_ymd_string() {
+        let day = DayNumber::from_ymd(2024, 2, 29);
+        assert_eq!(day.to_ymd_string(), "20240229");
+        assert_eq!(DayNumber::from_timestamp("20240229T120000").unwrap(), day);
+    }
+
+    #[test]
+    fn test_parse_timestamp_ymd_invalid() {
+        assert!(DayNumber::from_timestamp("short").is_none());
+        assert!(parse_timestamp_ymd("2024abcd").is_none());
+    }
+}

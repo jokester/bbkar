@@ -160,3 +160,87 @@ impl ChunkFilename {
         self.raw_size
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snap(name: &str) -> Timestamp {
+        Timestamp::parse(name).unwrap()
+    }
+
+    fn chunk(name: &str, size: u32, raw_size: Option<u64>) -> ChunkFilename {
+        ChunkFilename::new(name.to_string(), size, Some("zstd".to_string()), raw_size, None)
+    }
+
+    #[test]
+    fn test_dest_meta_sorts_and_tracks_newest_oldest() {
+        let meta = DestMeta::new(
+            1,
+            2,
+            vec![
+                VolumeArchive {
+                    timestamp: snap("20230103"),
+                    parent_timestamp: None,
+                    chunks: vec![],
+                },
+                VolumeArchive {
+                    timestamp: snap("20230101"),
+                    parent_timestamp: None,
+                    chunks: vec![],
+                },
+            ],
+        );
+
+        assert_eq!(meta.oldest_archive().unwrap().timestamp.raw(), "20230101");
+        assert_eq!(meta.newest_archive().unwrap().timestamp.raw(), "20230103");
+    }
+
+    #[test]
+    fn test_dest_meta_add_archive_and_readable_sizes() {
+        let mut meta = DestMeta::new(1, 2, vec![]);
+        meta.add_archive(VolumeArchive {
+            timestamp: snap("20230102"),
+            parent_timestamp: None,
+            chunks: vec![chunk("a", 2048, Some(4096))],
+        });
+        meta.add_archive(VolumeArchive {
+            timestamp: snap("20230101"),
+            parent_timestamp: None,
+            chunks: vec![chunk("b", 512, Some(1024))],
+        });
+        meta.set_last_sync_timestamp(9);
+
+        assert_eq!(meta.archives()[0].timestamp.raw(), "20230101");
+        assert_eq!(meta.total_size(), 2560);
+        assert_eq!(meta.total_size_readable(), "2.5 KiB");
+        assert_eq!(meta.last_sync_timestamp, 9);
+    }
+
+    #[test]
+    fn test_volume_archive_size_helpers() {
+        let archive = VolumeArchive {
+            timestamp: snap("20230101"),
+            parent_timestamp: Some("20221231".to_string()),
+            chunks: vec![chunk("a", 10, Some(20)), chunk("b", 5, Some(15))],
+        };
+
+        assert!(archive.is_incremental());
+        assert_eq!(archive.total_size(), 15);
+        assert_eq!(archive.total_raw_size(), Some(35));
+    }
+
+    #[test]
+    fn test_volume_archive_raw_size_none_if_any_chunk_missing_raw_size() {
+        let archive = VolumeArchive {
+            timestamp: snap("20230101"),
+            parent_timestamp: None,
+            chunks: vec![chunk("a", 10, Some(20)), chunk("b", 5, None)],
+        };
+
+        assert_eq!(archive.total_raw_size(), None);
+        assert_eq!(archive.chunks[0].filename(), "a");
+        assert_eq!(archive.chunks[0].size(), 10);
+        assert_eq!(archive.chunks[0].raw_size(), Some(20));
+    }
+}

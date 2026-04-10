@@ -3,8 +3,10 @@ use std::path::Path;
 
 use crate::model::dest::DestState;
 use crate::model::error::{BR, BbkarError};
+use crate::model::plan::PruneDecision;
 use crate::model::source::Timestamp;
 use crate::service::executor::Executor;
+use crate::service::planner::Planner;
 
 pub fn ls(
     config_path: &Path,
@@ -12,6 +14,7 @@ pub fn ls(
     restore_root: Option<&str>,
     executor: Box<dyn Executor>,
 ) -> BR<()> {
+    let planner = Planner;
     executor.print_info("bbkar ls");
 
     if let Some(root) = restore_root {
@@ -24,11 +27,13 @@ pub fn ls(
     } else {
         super::for_each_volume(config_path, &*executor, name, |ctx| {
             let dest_state = executor.inspect_dest_volume(ctx.dest_spec, ctx.volume)?;
+            let prune_plan = planner.build_prune_plan(dest_state.meta.as_ref(), &ctx.retention_policy);
             print_snapshot_table(
                 &*executor,
                 ctx.volume,
                 &dest_state,
                 ctx.src_state.volume.snapshots(),
+                &prune_plan.decisions,
             );
             Ok(())
         })
@@ -73,6 +78,7 @@ fn print_snapshot_table(
     volume: &str,
     dest_state: &DestState,
     local_snapshots: &[Timestamp],
+    prune_decisions: &[PruneDecision],
 ) {
     let local: BTreeSet<Timestamp> = local_snapshots.iter().cloned().collect();
     let remote: BTreeSet<Timestamp> = dest_state
@@ -85,6 +91,10 @@ fn print_snapshot_table(
                 .collect()
         })
         .unwrap_or_default();
+    let prune_map = prune_decisions
+        .iter()
+        .map(|decision| (decision.snapshot.raw(), decision.prune_status()))
+        .collect::<std::collections::HashMap<_, _>>();
 
     // Column width: volume name + "." + longest snapshot name
     let max_snap_len = local
@@ -94,8 +104,12 @@ fn print_snapshot_table(
         .max()
         .unwrap_or(0);
     let col_width = volume.len() + 1 + max_snap_len;
+    let prune_width = "keep(required)".len();
 
-    executor.print_info(&format!("    {:<col_width$} state", "snapshot"));
+    executor.print_info(&format!(
+        "    {:<col_width$} {:<11} {:<prune_width$}",
+        "snapshot", "state", "prune"
+    ));
     for snapshot in local.union(&remote) {
         let state = match (local.contains(snapshot), remote.contains(snapshot)) {
             (true, false) => "local-only",
@@ -103,8 +117,16 @@ fn print_snapshot_table(
             (true, true) => "synced",
             (false, false) => unreachable!("union membership mismatch"),
         };
+        let prune = if remote.contains(snapshot) {
+            prune_map.get(snapshot.raw()).copied().unwrap_or("keep")
+        } else {
+            "-"
+        };
         let name = format!("{}.{}", volume, snapshot.raw());
-        executor.print_info(&format!("    {:<col_width$} {}", name, state));
+        executor.print_info(&format!(
+            "    {:<col_width$} {:<11} {:<prune_width$}",
+            name, state, prune
+        ));
     }
 }
 

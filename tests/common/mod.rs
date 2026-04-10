@@ -17,6 +17,11 @@ use bbkar::service::executor::write_dest::TransferStats;
 pub struct PrintedOutput(Arc<Mutex<Vec<String>>>);
 
 impl PrintedOutput {
+    #[allow(dead_code)]
+    pub fn from_shared(lines: Arc<Mutex<Vec<String>>>) -> Self {
+        Self(lines)
+    }
+
     pub fn lines(&self) -> Vec<String> {
         self.0.lock().unwrap().clone()
     }

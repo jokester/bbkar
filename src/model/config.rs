@@ -565,4 +565,62 @@ path = "bbkar"
             other => panic!("expected toml error, got {:?}", other),
         }
     }
+
+    #[test]
+    fn test_source_path_is_normalized_and_build_path_avoids_double_slash() {
+        let config = BbkarConfigFile::from_toml(
+            r#"[global]
+
+[source.src1]
+path = "/snapshots///"
+
+[dest.dst1]
+driver = "local"
+path = "/backup"
+
+[sync.main]
+source = "src1"
+dest = "dst1"
+"#,
+        )
+        .unwrap();
+
+        let source = config.source.get("src1").unwrap();
+        assert_eq!(source.path, "/snapshots");
+        assert_eq!(source.build_path("vol.20230101"), "/snapshots/vol.20230101");
+    }
+
+    #[test]
+    fn test_dest_display_location_formats_backends() {
+        let local = DestSpec {
+            backend_spec: BackendSpec::Local {
+                path: "/backup/local".to_string(),
+            },
+        };
+        assert_eq!(local.display_location(), "/backup/local");
+
+        let s3 = DestSpec {
+            backend_spec: BackendSpec::S3 {
+                bucket: "bucket".to_string(),
+                path: "/nested/path/".to_string(),
+                region: None,
+                endpoint: None,
+                access_key_id: None,
+                secret_access_key: None,
+                session_token: None,
+                disable_config_load: false,
+            },
+        };
+        assert_eq!(s3.display_location(), "s3://bucket/nested/path");
+
+        let gcs = DestSpec {
+            backend_spec: BackendSpec::Gcs {
+                bucket: "bucket".to_string(),
+                path: "".to_string(),
+                endpoint: None,
+                credential_path: None,
+            },
+        };
+        assert_eq!(gcs.display_location(), "gcs://bucket");
+    }
 }
