@@ -1,4 +1,7 @@
 use crate::model::config::SyncSpec;
+use crate::utils::format::{
+    format_calendar_days, format_preserve_count, format_time_unit, format_weekday,
+};
 use crate::utils::duration::{CalendarDuration, PreserveSchedule, Weekday};
 
 /// Controls how new snapshots are sent (full vs incremental).
@@ -16,6 +19,41 @@ pub struct RetentionPolicy {
     pub archive_preserve_min: Option<CalendarDuration>,
     pub archive_preserve: Option<PreserveSchedule>,
     pub preserve_day_of_week: Weekday,
+}
+
+impl RetentionPolicy {
+    pub fn describe(&self) -> String {
+        if self.archive_preserve_min.is_none() {
+            return "keep all archives".to_string();
+        }
+
+        let mut parts = vec![format!(
+            "keep all archives for {}",
+            format_calendar_days(self.archive_preserve_min.as_ref().unwrap().days)
+        )];
+
+        if let Some(schedule) = &self.archive_preserve {
+            let buckets = schedule
+                .buckets
+                .iter()
+                .map(|bucket| {
+                    format!(
+                        "{}{}",
+                        format_preserve_count(&bucket.count),
+                        format_time_unit(bucket.unit)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            parts.push(format!(
+                "then preserve {} (week anchor: {})",
+                buckets,
+                format_weekday(self.preserve_day_of_week)
+            ));
+        }
+
+        parts.join(", ")
+    }
 }
 
 /// Fully resolved policy parsed from SyncSpec config strings.

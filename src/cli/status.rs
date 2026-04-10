@@ -2,8 +2,10 @@ use std::path::Path;
 
 use crate::model::error::BR;
 use crate::service::executor::Executor;
+use crate::service::planner::Planner;
 
 pub fn status(config_path: &Path, name: Option<&str>, executor: Box<dyn Executor>) -> BR<()> {
+    let planner = Planner;
     executor.print_info("bbkar status");
 
     super::for_each_volume(config_path, &*executor, name, |ctx| {
@@ -39,6 +41,17 @@ pub fn status(config_path: &Path, name: Option<&str>, executor: Box<dyn Executor
             "remote usage",
             super::ArchiveStats::from_meta(dest_state.meta.as_ref()),
         );
+        executor.print_info(&format!(
+            "    retention: {}",
+            ctx.retention_policy.describe()
+        ));
+        let prune_plan = planner.build_prune_plan(dest_state.meta.as_ref(), &ctx.retention_policy);
+        executor.print_info(&format!(
+            "    next prune: keep {} archive(s), prune {} archive(s), required ancestor {} archive(s)",
+            prune_plan.kept_count(),
+            prune_plan.pruned_count(),
+            prune_plan.required_ancestor_count(),
+        ));
         Ok(())
     })
 }

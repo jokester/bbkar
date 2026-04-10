@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::model::config::{BbkarConfigFile, DestSpec, GlobalConfig, SourceSpec};
 use crate::model::dest::{DestMeta, VolumeArchive};
 use crate::model::error::BR;
-use crate::model::policy::{ResolvedSyncPolicy, SendPolicy};
+use crate::model::policy::{ResolvedSyncPolicy, RetentionPolicy, SendPolicy};
 use crate::service::executor::Executor;
 use crate::service::executor::inspect_source::SourceState;
 use crate::utils::format::format_bytes;
@@ -35,6 +35,7 @@ pub struct VolumeContext<'a> {
     pub volume: &'a str,
     pub src_state: &'a SourceState,
     pub send_policy: SendPolicy,
+    pub retention_policy: RetentionPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -189,6 +190,7 @@ fn for_each_sync(
                 volume,
                 src_state,
                 send_policy: policy.send.clone(),
+                retention_policy: policy.retention.clone(),
             })?;
         }
         on_sync_end(sync_name, src_spec, dest_spec, &policy.send)?;

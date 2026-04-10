@@ -1,14 +1,15 @@
-use std::collections::{HashMap, HashSet};
+mod prune;
+mod restore;
+mod send;
+mod time;
 
 use crate::DestSpec;
-use crate::model::dest::DestState;
-use crate::model::dest::VolumeArchive;
+use crate::model::dest::{DestMeta, DestState, VolumeArchive};
 use crate::model::error::BR;
-use crate::model::plan::{RestorePlan, RestoreStep, RunPlan, RunStep};
-use crate::model::policy::SendPolicy;
+use crate::model::plan::{PrunePlan, RestorePlan, RunPlan};
+use crate::model::policy::{RetentionPolicy, SendPolicy};
 use crate::model::source::Timestamp;
 use crate::service::executor::inspect_source::SourceState;
-use tracing::{debug, trace};
 
 /**
  * A planner provides the strategy to sync source and destination
@@ -24,111 +25,7 @@ impl Planner {
         dest_state: &DestState,
         send_policy: &SendPolicy,
     ) -> BR<RunPlan> {
-        // Collect snapshot names already archived in dest
-        let archives = dest_state
-            .meta
-            .as_ref()
-            .map(|m| m.archives())
-            .unwrap_or(&[]);
-
-        let mut dest_set: HashSet<&str> = archives.iter().map(|a| a.timestamp.raw()).collect();
-
-        // Build archive map: snapshot_name -> &VolumeArchive
-        let archive_map: HashMap<&str, _> =
-            archives.iter().map(|a| (a.timestamp.raw(), a)).collect();
-
-        // Compute depth cache from existing dest archives
-        let mut depth_cache: HashMap<&str, u32> = HashMap::new();
-        for a in archives {
-            compute_depth(a.timestamp.raw(), &archive_map, &mut depth_cache);
-        }
-
-        // Source snapshot names as a set for quick lookup
-        let src_names: HashSet<&str> = src_state
-            .volume
-            .snapshots()
-            .iter()
-            .map(|s| s.raw())
-            .collect();
-
-        // Track last full send (from dest archives, most recent)
-        let mut last_full: Option<&Timestamp> = archives
-            .iter()
-            .rev()
-            .find(|a| !a.is_incremental())
-            .map(|a| &a.timestamp);
-
-        let mut steps = Vec::new();
-        debug!(
-            volume = %volume,
-            source_snapshots = src_state.volume.snapshots().len(),
-            existing_archives = archives.len(),
-            dest = %dest_spec.display_location(),
-            max_incremental_depth = ?send_policy.max_incremental_depth,
-            min_full_send_interval_days = send_policy.min_full_send_interval.days,
-            last_full = last_full.map(|s| s.raw()),
-            "building plan"
-        );
-
-        for snap in src_state.volume.snapshots().iter() {
-            if dest_set.contains(snap.raw()) {
-                trace!(volume = %volume, snapshot = %snap.raw(), "snapshot already archived");
-                continue;
-            }
-
-            // Find parent candidate: most recent snapshot older than current
-            // that exists in BOTH source and dest (including planned sends)
-            let parent = find_parent_candidate(snap, &dest_set, &src_names, src_state);
-
-            let send_full = match parent {
-                None => true,
-                Some(parent_snap) => {
-                    let parent_depth = depth_cache.get(parent_snap.raw()).copied().unwrap_or(0);
-                    let would_exceed_depth = send_policy
-                        .max_incremental_depth
-                        .is_some_and(|max| parent_depth + 1 >= max);
-                    let interval_exceeded = check_interval_exceeded(
-                        last_full,
-                        snap,
-                        &send_policy.min_full_send_interval,
-                    );
-                    would_exceed_depth || interval_exceeded
-                }
-            };
-
-            if send_full {
-                debug!(
-                    volume = %volume,
-                    snapshot = %snap.raw(),
-                    parent = parent.map(|p| p.raw()),
-                    reason = if parent.is_none() {
-                        "no_parent"
-                    } else {
-                        "policy_forced_full"
-                    },
-                    "planning full send"
-                );
-                steps.push(RunStep::SendFull(snap.clone()));
-                last_full = Some(snap);
-                depth_cache.insert(snap.raw(), 0);
-            } else {
-                let parent_snap = parent.unwrap();
-                let parent_depth = depth_cache.get(parent_snap.raw()).copied().unwrap_or(0);
-                debug!(
-                    volume = %volume,
-                    snapshot = %snap.raw(),
-                    parent = %parent_snap.raw(),
-                    resulting_depth = parent_depth + 1,
-                    "planning incremental send"
-                );
-                steps.push(RunStep::SendIncremental(snap.clone(), parent_snap.clone()));
-                depth_cache.insert(snap.raw(), parent_depth + 1);
-            }
-            dest_set.insert(snap.raw());
-        }
-
-        debug!(volume = %volume, planned_steps = steps.len(), "plan built");
-        Ok(RunPlan { steps })
+        send::build_send_plan(volume, src_state, dest_spec, dest_state, send_policy)
     }
 
     /// Build a restore plan: walk the parent chain from `target` back to a full
@@ -138,123 +35,26 @@ impl Planner {
         archives: &[VolumeArchive],
         target: &Timestamp,
     ) -> BR<RestorePlan> {
-        let mut chain = Vec::new();
-
-        let target_archive = archives
-            .iter()
-            .find(|a| a.timestamp == *target)
-            .ok_or_else(|| {
-                crate::model::error::BbkarError::Plan(format!(
-                    "snapshot '{}' not found in archives",
-                    target.raw()
-                ))
-            })?;
-
-        chain.push(target_archive);
-
-        let mut current = target_archive;
-        while let Some(ref parent_raw) = current.parent_timestamp {
-            current = archives
-                .iter()
-                .find(|a| a.timestamp.raw() == parent_raw.as_str())
-                .ok_or_else(|| {
-                    crate::model::error::BbkarError::Plan(format!(
-                        "parent snapshot '{}' not found in archives (required by '{}')",
-                        parent_raw,
-                        current.timestamp.raw()
-                    ))
-                })?;
-            chain.push(current);
-        }
-
-        chain.reverse();
-
-        let steps = chain
-            .into_iter()
-            .map(|a| {
-                if let Some(ref parent) = a.parent_timestamp {
-                    RestoreStep::ReceiveIncremental(
-                        a.timestamp.clone(),
-                        Timestamp::parse(parent).unwrap(),
-                    )
-                } else {
-                    RestoreStep::ReceiveFull(a.timestamp.clone())
-                }
-            })
-            .collect();
-
-        Ok(RestorePlan { steps })
+        restore::build_restore_plan(archives, target)
     }
-}
 
-/// Recursively compute depth: 0 = full, N = N incrementals deep.
-fn compute_depth<'a>(
-    name: &'a str,
-    archive_map: &HashMap<&'a str, &'a crate::model::dest::VolumeArchive>,
-    cache: &mut HashMap<&'a str, u32>,
-) -> u32 {
-    if let Some(&d) = cache.get(name) {
-        return d;
+    pub fn build_prune_plan(
+        &self,
+        meta: Option<&DestMeta>,
+        retention_policy: &RetentionPolicy,
+    ) -> PrunePlan {
+        prune::build_prune_plan(meta, retention_policy)
     }
-    let depth = match archive_map.get(name) {
-        Some(archive) => match &archive.parent_timestamp {
-            None => 0,
-            Some(parent) => compute_depth(parent.as_str(), archive_map, cache) + 1,
-        },
-        None => 0, // not found, treat as full
-    };
-    cache.insert(name, depth);
-    depth
-}
 
-/// Find the most recent snapshot older than `snap` that exists in both source and dest
-/// (including snapshots planned in current run).
-fn find_parent_candidate<'a>(
-    snap: &Timestamp,
-    dest_set: &HashSet<&str>,
-    src_names: &HashSet<&str>,
-    src_state: &'a SourceState,
-) -> Option<&'a Timestamp> {
-    src_state
-        .volume
-        .snapshots()
-        .iter()
-        .rev()
-        .filter(|s| s < &snap)
-        .find(|s| dest_set.contains(s.raw()) && src_names.contains(s.raw()))
-}
-
-/// Check if the interval between last_full and current snapshot >= min_full_send_interval.
-fn check_interval_exceeded(
-    last_full: Option<&Timestamp>,
-    current: &Timestamp,
-    interval: &crate::utils::duration::CalendarDuration,
-) -> bool {
-    let Some(last) = last_full else {
-        return true; // no previous full → force full
-    };
-    let Some(last_days) = parse_date_to_days(last.timestamp()) else {
-        return true;
-    };
-    let Some(current_days) = parse_date_to_days(current.timestamp()) else {
-        return true;
-    };
-    (current_days - last_days) >= interval.days as i64
-}
-
-/// Extract YYYYMMDD from a timestamp string and convert to an approximate day count.
-fn parse_date_to_days(timestamp: &str) -> Option<i64> {
-    // Timestamps are like "20230101", "20230101T1531", "20230101T153123+0200"
-    // We only need the first 8 chars (YYYYMMDD)
-    if timestamp.len() < 8 {
-        return None;
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn build_prune_plan_at(
+        &self,
+        meta: Option<&DestMeta>,
+        retention_policy: &RetentionPolicy,
+        now_days: i64,
+    ) -> PrunePlan {
+        prune::build_prune_plan_at(meta, retention_policy, now_days)
     }
-    let date_str = &timestamp[..8];
-    let year: i64 = date_str[0..4].parse().ok()?;
-    let month: i64 = date_str[4..6].parse().ok()?;
-    let day: i64 = date_str[6..8].parse().ok()?;
-    // Approximate day count (sufficient for interval comparison)
-    Some(year * 365 + month * 30 + day)
 }
 
 #[cfg(test)]
@@ -262,8 +62,10 @@ mod tests {
     use super::*;
     use crate::model::config::BackendSpec;
     use crate::model::dest::{DestMeta, VolumeArchive};
+    use crate::model::plan::{PruneReason, PruneStep, RunStep};
     use crate::model::source::{Series, Timestamp};
-    use crate::utils::duration::CalendarDuration;
+    use crate::service::planner::time::day_number_from_ymd;
+    use crate::utils::duration::{CalendarDuration, Weekday};
 
     fn snap(name: &str) -> Timestamp {
         Timestamp::parse(name).unwrap()
@@ -323,6 +125,22 @@ mod tests {
                 days: interval_days,
             },
             max_incremental_depth: max_depth,
+        }
+    }
+
+    fn retention_policy_all() -> RetentionPolicy {
+        RetentionPolicy {
+            archive_preserve_min: None,
+            archive_preserve: None,
+            preserve_day_of_week: Weekday::Sunday,
+        }
+    }
+
+    fn retention_policy_days(days: u32) -> RetentionPolicy {
+        RetentionPolicy {
+            archive_preserve_min: Some(CalendarDuration { days }),
+            archive_preserve: None,
+            preserve_day_of_week: Weekday::Sunday,
         }
     }
 
@@ -512,5 +330,67 @@ mod tests {
         assert_eq!(plan.steps.len(), 2);
         assert!(matches!(&plan.steps[0], RunStep::SendFull(s) if s.raw() == "20230102"));
         assert!(matches!(&plan.steps[1], RunStep::SendFull(s) if s.raw() == "20230103"));
+    }
+
+    #[test]
+    fn test_prune_plan_commits_metadata_before_delete_steps() {
+        let planner = Planner;
+        let meta = DestMeta::new(
+            1,
+            2,
+            vec![
+                VolumeArchive {
+                    timestamp: snap("20230101"),
+                    parent_timestamp: None,
+                    chunks: vec![],
+                },
+                VolumeArchive {
+                    timestamp: snap("20230102"),
+                    parent_timestamp: None,
+                    chunks: vec![],
+                },
+            ],
+        );
+        let plan = planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), day_number_from_ymd(2023, 1, 10));
+
+        assert!(matches!(plan.steps.first(), Some(PruneStep::CommitMetadata(_))));
+        assert!(matches!(plan.steps.get(1), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230101"));
+        assert!(matches!(plan.steps.get(2), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230102"));
+    }
+
+    #[test]
+    fn test_prune_plan_keeps_unparseable_timestamps_conservatively() {
+        let planner = Planner;
+        let meta = DestMeta::new(
+            1,
+            2,
+            vec![VolumeArchive {
+                timestamp: snap("badstamp"),
+                parent_timestamp: None,
+                chunks: vec![],
+            }],
+        );
+        let plan = planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), day_number_from_ymd(2023, 1, 10));
+
+        assert_eq!(plan.pruned_count(), 0);
+        assert!(matches!(plan.decisions[0].reason, PruneReason::KeepAll));
+    }
+
+    #[test]
+    fn test_prune_plan_keep_all_produces_no_delete_steps() {
+        let planner = Planner;
+        let meta = DestMeta::new(
+            1,
+            2,
+            vec![VolumeArchive {
+                timestamp: snap("20230101"),
+                parent_timestamp: None,
+                chunks: vec![],
+            }],
+        );
+        let plan = planner.build_prune_plan_at(Some(&meta), &retention_policy_all(), day_number_from_ymd(2023, 1, 10));
+
+        assert!(plan.steps.is_empty());
+        assert_eq!(plan.kept_count(), 1);
     }
 }

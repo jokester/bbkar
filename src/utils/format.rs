@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::utils::duration::{PreserveCount, TimeUnit, Weekday};
+
 pub fn format_bytes(n: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = 1024 * KIB;
@@ -28,9 +30,47 @@ pub fn format_speed(bytes: u64, duration: Duration) -> String {
     format!("{}/s", format_bytes(bytes_per_sec))
 }
 
+pub fn format_calendar_days(days: u32) -> String {
+    match days {
+        d if d % 365 == 0 => format!("{}y", d / 365),
+        d if d % 30 == 0 => format!("{}m", d / 30),
+        d if d % 7 == 0 => format!("{}w", d / 7),
+        d => format!("{d}d"),
+    }
+}
+
+pub fn format_preserve_count(count: &PreserveCount) -> String {
+    match count {
+        PreserveCount::All => "*".to_string(),
+        PreserveCount::Finite(n) => n.to_string(),
+    }
+}
+
+pub fn format_time_unit(unit: TimeUnit) -> &'static str {
+    match unit {
+        TimeUnit::Day => "d",
+        TimeUnit::Week => "w",
+        TimeUnit::Month => "m",
+        TimeUnit::Year => "y",
+    }
+}
+
+pub fn format_weekday(weekday: Weekday) -> &'static str {
+    match weekday {
+        Weekday::Monday => "monday",
+        Weekday::Tuesday => "tuesday",
+        Weekday::Wednesday => "wednesday",
+        Weekday::Thursday => "thursday",
+        Weekday::Friday => "friday",
+        Weekday::Saturday => "saturday",
+        Weekday::Sunday => "sunday",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::duration::{PreserveCount, TimeUnit, Weekday};
 
     #[test]
     fn test_format_bytes() {
@@ -41,5 +81,21 @@ mod tests {
         assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GiB");
         assert_eq!(format_bytes(1024 * 1024 * 1024 * 1024), "1.00 TiB");
         assert_eq!(format_bytes(1536), "1.50 KiB");
+    }
+
+    #[test]
+    fn test_format_calendar_days() {
+        assert_eq!(format_calendar_days(7), "1w");
+        assert_eq!(format_calendar_days(30), "1m");
+        assert_eq!(format_calendar_days(365), "1y");
+        assert_eq!(format_calendar_days(10), "10d");
+    }
+
+    #[test]
+    fn test_format_policy_helpers() {
+        assert_eq!(format_preserve_count(&PreserveCount::All), "*");
+        assert_eq!(format_preserve_count(&PreserveCount::Finite(12)), "12");
+        assert_eq!(format_time_unit(TimeUnit::Month), "m");
+        assert_eq!(format_weekday(Weekday::Sunday), "sunday");
     }
 }
