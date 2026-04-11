@@ -107,4 +107,12 @@ mod tests {
         assert!(matches!(err, BbkarError::Yaml(_)));
         assert!(err.to_string().contains("YAML Error:"));
     }
+
+    #[test]
+    fn test_from_opendal_error() {
+        let err = opendal::Error::new(opendal::ErrorKind::Unexpected, "boom");
+        let err: BbkarError = err.into();
+        assert!(matches!(err, BbkarError::OpenDal(_)));
+        assert!(err.to_string().contains("OpenDAL Error:"));
+    }
 }

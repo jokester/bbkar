@@ -333,6 +333,13 @@ filter = ["*"]
         )
     }
 
+    fn expect_config_errors(content: &str) -> Vec<String> {
+        match BbkarConfigFile::from_toml(content).unwrap_err() {
+            BbkarError::Config(errors) => errors,
+            other => panic!("expected config error, got {:?}", other),
+        }
+    }
+
     #[test]
     fn test_parse_local_dest_backend() {
         let config = BbkarConfigFile::from_toml(&base_config_with_dest(
@@ -622,5 +629,131 @@ dest = "dst1"
             },
         };
         assert_eq!(gcs.display_location(), "gcs://bucket");
+    }
+
+    #[test]
+    fn test_dest_root_path_and_default_filters() {
+        let config = BbkarConfigFile::from_toml(&base_config_with_dest(
+            r#"[dest.dst1]
+driver = "local"
+path = "/backup/local"
+"#,
+        ))
+        .unwrap();
+
+        assert_eq!(config.dest["dst1"].root_path(), "/backup/local");
+        assert_eq!(config.source["src1"].filter, vec!["*".to_string()]);
+        assert_eq!(config.sync["main"].filter, vec!["*".to_string()]);
+    }
+
+    #[test]
+    fn test_global_validation_collects_multiple_errors() {
+        let content = r#"[global]
+compression = "gzip"
+max_backup_chunk_size = 0
+btrfs_send_concurrency = 2
+write_archive_concurrency = 3
+
+[source.src1]
+path = "/snapshots"
+
+[dest.dst1]
+driver = "local"
+path = "/backup"
+
+[sync.main]
+source = "src1"
+dest = "dst1"
+"#;
+        let errors = expect_config_errors(content);
+
+        assert!(errors.iter().any(|e| e.contains("global.compression must be \"zstd\"")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("global.max_backup_chunk_size must be in range 1..=2048")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("global.btrfs_send_concurrency must be 1")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("global.write_archive_concurrency must be 1")));
+    }
+
+    #[test]
+    fn test_sync_validation_reports_unknown_refs_and_invalid_policy_values() {
+        let content = r#"[global]
+
+[source.src1]
+path = "/snapshots"
+
+[dest.dst1]
+driver = "local"
+path = "/backup"
+
+[sync.main]
+source = "missing-source"
+dest = "missing-dest"
+min_full_send_interval = "nonsense"
+max_incremental_depth = 0
+archive_preserve_min = "never"
+archive_preserve = "weird"
+preserve_day_of_week = "funday"
+"#;
+        let errors = expect_config_errors(content);
+
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.source refers to unknown source")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.dest refers to unknown dest")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.min_full_send_interval: invalid duration")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.max_incremental_depth must be >= 1")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.archive_preserve_min: must be \"all\" or valid duration")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.archive_preserve: invalid schedule")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("sync.main.preserve_day_of_week: invalid weekday")));
+    }
+
+    #[test]
+    fn test_support_limit_validation_reports_multiple_sections() {
+        let content = r#"[global]
+
+[source.src1]
+path = "/snapshots"
+
+[source.src2]
+path = "/snapshots-2"
+
+[dest.dst1]
+driver = "local"
+path = "/backup"
+
+[dest.dst2]
+driver = "local"
+path = "/backup-2"
+
+[sync.main]
+source = "src1"
+dest = "dst1"
+
+[sync.extra]
+source = "src2"
+dest = "dst2"
+"#;
+        let errors = expect_config_errors(content);
+
+        assert!(errors.iter().any(|e| e.contains("at most 1 source is supported")));
+        assert!(errors.iter().any(|e| e.contains("at most 1 dest is supported")));
+        assert!(errors.iter().any(|e| e.contains("at most 1 sync is supported")));
     }
 }

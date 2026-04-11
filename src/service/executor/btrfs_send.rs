@@ -70,3 +70,113 @@ impl Iterator for BtrfsSendIterator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    fn shell_child(script: &str) -> std::process::Child {
+        Command::new("sh")
+            .args(["-c", script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_iterator_yields_stdout_bytes_then_process_exit() {
+        let child = shell_child("printf 'hello world'; printf 'warn' >&2");
+        let mut iter = BtrfsSendIterator::new(child);
+
+        let first = iter.next().unwrap().unwrap();
+        let second = iter.next().unwrap().unwrap();
+
+        match first {
+            BtrfsSendChunk::StdoutBytes(bytes, offset) => {
+                assert_eq!(bytes, b"hello world");
+                assert_eq!(offset, 0);
+            }
+            other => panic!("unexpected first chunk: {}", chunk_kind(&other)),
+        }
+
+        match second {
+            BtrfsSendChunk::ProcessExit(code, stderr) => {
+                assert_eq!(code, 0);
+                assert_eq!(stderr, "warn");
+            }
+            other => panic!("unexpected second chunk: {}", chunk_kind(&other)),
+        }
+
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_iterator_tracks_offsets_across_multiple_reads() {
+        let script = format!(
+            "python3 - <<'PY'\nimport sys\nsys.stdout.write('a' * {})\nPY",
+            READ_BUF_SIZE + 17
+        );
+        let child = shell_child(&script);
+        let mut iter = BtrfsSendIterator::new(child);
+
+        let mut reconstructed = Vec::new();
+        let mut expected_offset = 0u64;
+        let mut saw_multiple_stdout_chunks = false;
+
+        loop {
+            match iter.next().unwrap().unwrap() {
+                BtrfsSendChunk::StdoutBytes(bytes, offset) => {
+                    assert_eq!(offset, expected_offset);
+                    expected_offset += bytes.len() as u64;
+                    reconstructed.extend_from_slice(&bytes);
+                    if expected_offset > bytes.len() as u64 {
+                        saw_multiple_stdout_chunks = true;
+                    }
+                }
+                BtrfsSendChunk::ProcessExit(code, stderr) => {
+                    assert_eq!(code, 0);
+                    assert!(stderr.is_empty());
+                    break;
+                }
+            }
+        }
+
+        assert!(saw_multiple_stdout_chunks);
+        assert_eq!(reconstructed.len(), READ_BUF_SIZE + 17);
+        assert!(reconstructed.iter().all(|b| *b == b'a'));
+    }
+
+    #[test]
+    fn test_iterator_reports_non_zero_exit_and_stderr() {
+        let child = shell_child("printf 'partial'; printf 'boom' >&2; exit 7");
+        let mut iter = BtrfsSendIterator::new(child);
+
+        let first = iter.next().unwrap().unwrap();
+        let second = iter.next().unwrap().unwrap();
+
+        match first {
+            BtrfsSendChunk::StdoutBytes(bytes, offset) => {
+                assert_eq!(bytes, b"partial");
+                assert_eq!(offset, 0);
+            }
+            other => panic!("unexpected first chunk: {}", chunk_kind(&other)),
+        }
+
+        match second {
+            BtrfsSendChunk::ProcessExit(code, stderr) => {
+                assert_eq!(code, 7);
+                assert_eq!(stderr, "boom");
+            }
+            other => panic!("unexpected second chunk: {}", chunk_kind(&other)),
+        }
+    }
+
+    fn chunk_kind(chunk: &BtrfsSendChunk) -> &'static str {
+        match chunk {
+            BtrfsSendChunk::StdoutBytes(_, _) => "stdout",
+            BtrfsSendChunk::ProcessExit(_, _) => "exit",
+        }
+    }
+}

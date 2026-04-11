@@ -28,13 +28,21 @@ impl RealExecutor {
     }
 
     fn ensure_sudo(&self) -> BR<()> {
+        self.ensure_sudo_with(SudoSession::new, |session| session.ensure_active())
+    }
+
+    fn ensure_sudo_with(
+        &self,
+        create_session: impl FnOnce() -> BR<SudoSession>,
+        refresh_session: impl FnOnce(&mut SudoSession) -> BR<()>,
+    ) -> BR<()> {
         let mut session = self.sudo_session.borrow_mut();
         if session.is_none() {
             debug!("initializing sudo session");
-            *session = Some(SudoSession::new()?);
+            *session = Some(create_session()?);
         } else {
             debug!("refreshing sudo session");
-            session.as_mut().unwrap().ensure_active()?;
+            refresh_session(session.as_mut().unwrap())?;
         }
         Ok(())
     }
@@ -44,21 +52,7 @@ impl RealExecutor {
         let needs_sudo = self.sudo_session.borrow().as_ref().unwrap().needs_sudo();
         debug!(root = %root, needs_sudo, "spawning btrfs receive");
 
-        let child = if needs_sudo {
-            Command::new("sudo")
-                .args(["btrfs", "receive", root])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-        } else {
-            Command::new("btrfs")
-                .args(["receive", root])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-        };
+        let child = build_btrfs_receive_command(root, needs_sudo).spawn();
         child.map_err(BbkarError::Io)
     }
 
@@ -67,24 +61,42 @@ impl RealExecutor {
         let needs_sudo = self.sudo_session.borrow().as_ref().unwrap().needs_sudo();
         debug!(args = ?args, needs_sudo, "spawning btrfs send");
 
-        let child = if needs_sudo {
-            let mut sudo_args = vec!["btrfs", "send"];
-            sudo_args.extend_from_slice(args);
-            Command::new("sudo")
-                .args(&sudo_args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-        } else {
-            Command::new("btrfs")
-                .arg("send")
-                .args(args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-        };
+        let child = build_btrfs_send_command(args, needs_sudo).spawn();
         child.map_err(BbkarError::Io)
     }
+}
+
+fn build_btrfs_receive_command(root: &str, needs_sudo: bool) -> Command {
+    let mut command = if needs_sudo {
+        let mut command = Command::new("sudo");
+        command.args(["btrfs", "receive", root]);
+        command
+    } else {
+        let mut command = Command::new("btrfs");
+        command.args(["receive", root]);
+        command
+    };
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::piped());
+    command
+}
+
+fn build_btrfs_send_command(args: &[&str], needs_sudo: bool) -> Command {
+    let mut command = if needs_sudo {
+        let mut command = Command::new("sudo");
+        command.args(["btrfs", "send"]);
+        command.args(args);
+        command
+    } else {
+        let mut command = Command::new("btrfs");
+        command.arg("send");
+        command.args(args);
+        command
+    };
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    command
 }
 
 impl Executor for RealExecutor {
@@ -194,35 +206,163 @@ impl Executor for RealExecutor {
 
         // Spawn btrfs receive
         let mut child = self.btrfs_receive_command(receive_root)?;
-        let mut stdin = child.stdin.take().unwrap();
+        pipe_restore_stream(&mut decoder, &mut child)
+    }
+}
 
-        // Pipe decompressed stream to btrfs receive stdin
-        match std::io::copy(&mut decoder, &mut stdin) {
-            Ok(bytes) => {
-                debug!(bytes, "wrote decompressed stream to btrfs receive");
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                debug!("btrfs receive closed stdin early");
-            }
-            Err(e) => return Err(BbkarError::Io(e)),
+fn pipe_restore_stream(input: &mut impl Read, child: &mut std::process::Child) -> BR<()> {
+    let mut stdin = child.stdin.take().unwrap();
+
+    match std::io::copy(input, &mut stdin) {
+        Ok(bytes) => {
+            debug!(bytes, "wrote decompressed stream to btrfs receive");
         }
-        drop(stdin);
-
-        // Read stderr and wait for exit
-        let mut stderr_str = String::new();
-        if let Some(mut stderr) = child.stderr.take() {
-            let _ = stderr.read_to_string(&mut stderr_str);
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+            debug!("btrfs receive closed stdin early");
         }
+        Err(e) => return Err(BbkarError::Io(e)),
+    }
+    drop(stdin);
 
-        let status = child.wait().map_err(BbkarError::Io)?;
-        if !status.success() {
-            return Err(BbkarError::Execution(format!(
-                "btrfs receive failed (exit {}): {}",
-                status.code().unwrap_or(-1),
-                stderr_str.trim()
-            )));
-        }
+    let mut stderr_str = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let _ = stderr.read_to_string(&mut stderr_str);
+    }
 
-        Ok(())
+    let status = child.wait().map_err(BbkarError::Io)?;
+    if !status.success() {
+        return Err(BbkarError::Execution(format!(
+            "btrfs receive failed (exit {}): {}",
+            status.code().unwrap_or(-1),
+            stderr_str.trim()
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::service::executor::sudo::ExecutionStrategy;
+    use std::ffi::OsStr;
+    use std::io::Cursor;
+    use std::process::Stdio;
+
+    fn args_of(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn test_build_btrfs_receive_command_without_sudo() {
+        let command = build_btrfs_receive_command("/root", false);
+
+        assert_eq!(command.get_program(), OsStr::new("btrfs"));
+        assert_eq!(args_of(&command), vec!["receive", "/root"]);
+    }
+
+    #[test]
+    fn test_build_btrfs_receive_command_with_sudo() {
+        let command = build_btrfs_receive_command("/root", true);
+
+        assert_eq!(command.get_program(), OsStr::new("sudo"));
+        assert_eq!(args_of(&command), vec!["btrfs", "receive", "/root"]);
+    }
+
+    #[test]
+    fn test_build_btrfs_send_command_without_sudo() {
+        let command = build_btrfs_send_command(&["-p", "/parent", "/snap"], false);
+
+        assert_eq!(command.get_program(), OsStr::new("btrfs"));
+        assert_eq!(args_of(&command), vec!["send", "-p", "/parent", "/snap"]);
+    }
+
+    #[test]
+    fn test_build_btrfs_send_command_with_sudo() {
+        let command = build_btrfs_send_command(&["/snap"], true);
+
+        assert_eq!(command.get_program(), OsStr::new("sudo"));
+        assert_eq!(args_of(&command), vec!["btrfs", "send", "/snap"]);
+    }
+
+    #[test]
+    fn test_ensure_sudo_creates_session_when_missing() {
+        let executor = RealExecutor::new().unwrap();
+
+        executor
+            .ensure_sudo_with(
+                || {
+                    Ok(SudoSession::test_session(ExecutionStrategy::Direct))
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+
+        assert!(executor.sudo_session.borrow().is_some());
+    }
+
+    #[test]
+    fn test_ensure_sudo_refreshes_existing_session() {
+        let executor = RealExecutor {
+            sudo_session: RefCell::new(Some(SudoSession::test_session(
+                ExecutionStrategy::SudoPasswordless,
+            ))),
+        };
+        let mut refreshed = false;
+
+        executor
+            .ensure_sudo_with(
+                || unreachable!(),
+                |_| {
+                    refreshed = true;
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        assert!(refreshed);
+    }
+
+    fn shell_child(script: &str) -> std::process::Child {
+        Command::new("sh")
+            .args(["-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_pipe_restore_stream_success() {
+        let payload = zstd::stream::encode_all(Cursor::new(b"restore payload"), 0).unwrap();
+        let mut decoder = zstd::stream::read::Decoder::new(Cursor::new(payload)).unwrap();
+        let mut child = shell_child("cat >/dev/null");
+
+        pipe_restore_stream(&mut decoder, &mut child).unwrap();
+    }
+
+    #[test]
+    fn test_pipe_restore_stream_tolerates_broken_pipe() {
+        let payload = zstd::stream::encode_all(Cursor::new(vec![b'a'; 1024]), 0).unwrap();
+        let mut decoder = zstd::stream::read::Decoder::new(Cursor::new(payload)).unwrap();
+        let mut child = shell_child("exit 0");
+
+        pipe_restore_stream(&mut decoder, &mut child).unwrap();
+    }
+
+    #[test]
+    fn test_pipe_restore_stream_surfaces_child_failure() {
+        let payload = zstd::stream::encode_all(Cursor::new(b"restore payload"), 0).unwrap();
+        let mut decoder = zstd::stream::read::Decoder::new(Cursor::new(payload)).unwrap();
+        let mut child = shell_child("cat >/dev/null; echo bad >&2; exit 7");
+
+        let err = pipe_restore_stream(&mut decoder, &mut child).unwrap_err();
+
+        let rendered = format!("{err}");
+        assert!(rendered.contains("btrfs receive failed (exit 7): bad"));
     }
 }

@@ -162,6 +162,46 @@ fn test_status_empty_dest() {
 }
 
 #[test]
+fn test_status_errors_for_unknown_sync_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = common::make_config_file(
+        &tmp,
+        "src1",
+        "/fake/source",
+        "dst1",
+        "/fake/dest",
+        &["myvol"],
+    );
+
+    let (executor, _output) = common::MockExecutor::new(HashMap::new(), HashMap::new(), 0);
+    let err = bbkar::cli::status(&config_path, Some("missing"), Box::new(executor)).unwrap_err();
+
+    let rendered = format!("{err}");
+    assert!(rendered.contains("sync 'missing' not found in config"));
+    assert!(rendered.contains("available: main"));
+}
+
+#[test]
+fn test_status_skips_filtered_out_volumes() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let mut sources = HashMap::new();
+    sources.insert("other".to_string(), source_state("other", &["20230101"]));
+
+    let config_path =
+        common::make_config_file(&tmp, "src1", "/fake/source", "dst1", "/fake/dest", &["db*"]);
+
+    let (executor, output) = common::MockExecutor::new(sources, HashMap::new(), 0);
+    bbkar::cli::status(&config_path, None, Box::new(executor)).unwrap();
+
+    let text = output.text();
+    assert!(text.contains("bbkar status"));
+    assert!(text.contains("[sync.main]"));
+    assert!(!text.contains("local snapshots"));
+    assert!(!text.contains("volume:"));
+}
+
+#[test]
 fn test_status_prints_non_default_policies() {
     let tmp = tempfile::tempdir().unwrap();
 

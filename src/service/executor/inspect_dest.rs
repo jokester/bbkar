@@ -36,6 +36,7 @@ pub fn inspect_dest_volume(spec: &DestSpec, volume: &str) -> BR<DestState> {
 #[cfg(test)]
 mod test_inspect_dest {
     use super::*;
+    use crate::model::error::BbkarError;
 
     #[test]
     fn test_missing_meta_returns_none() {
@@ -70,5 +71,42 @@ mod test_inspect_dest {
         assert_eq!(meta.first_sync_timestamp, 1000);
         assert_eq!(meta.last_sync_timestamp, 2000);
         assert!(meta.archives().is_empty());
+    }
+
+    #[test]
+    fn test_invalid_utf8_metadata_returns_opendal_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let vol_dir = dir.path().join("myvolume");
+        std::fs::create_dir_all(&vol_dir).unwrap();
+        std::fs::write(vol_dir.join(META_FILENAME), [0xff, 0xfe, 0xfd]).unwrap();
+
+        let spec = DestSpec {
+            backend_spec: crate::model::config::BackendSpec::Local {
+                path: dir.path().to_string_lossy().to_string(),
+            },
+        };
+        let err = inspect_dest_volume(&spec, "myvolume").unwrap_err();
+        match err {
+            BbkarError::OpenDal(inner) => {
+                assert_eq!(inner.kind(), opendal::ErrorKind::Unexpected);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_yaml_metadata_returns_yaml_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let vol_dir = dir.path().join("myvolume");
+        std::fs::create_dir_all(&vol_dir).unwrap();
+        std::fs::write(vol_dir.join(META_FILENAME), "not: [valid").unwrap();
+
+        let spec = DestSpec {
+            backend_spec: crate::model::config::BackendSpec::Local {
+                path: dir.path().to_string_lossy().to_string(),
+            },
+        };
+        let err = inspect_dest_volume(&spec, "myvolume").unwrap_err();
+        assert!(matches!(err, BbkarError::Yaml(_)));
     }
 }

@@ -363,3 +363,122 @@ pub fn write_metadata_to_dest(dest_spec: &DestSpec, volume: &str, meta: &DestMet
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::dest::VolumeArchive;
+    use crate::model::source::Timestamp;
+
+    fn local_dest(path: &std::path::Path) -> DestSpec {
+        DestSpec {
+            backend_spec: BackendSpec::Local {
+                path: path.to_string_lossy().to_string(),
+            },
+        }
+    }
+
+    fn snap(name: &str) -> Timestamp {
+        Timestamp::parse(name).unwrap()
+    }
+
+    #[test]
+    fn test_transfer_stats_compress_time_saturates() {
+        let stats = TransferStats {
+            elapsed: Duration::from_secs(1),
+            raw_bytes: 0,
+            compressed_bytes: 0,
+            read_time: Duration::from_secs(2),
+            write_time: Duration::from_secs(3),
+        };
+
+        assert_eq!(stats.compress_time(), Duration::ZERO);
+    }
+
+    #[test]
+    fn test_chunked_writer_finish_without_data_returns_no_chunks() {
+        let counter = Rc::new(Cell::new(0));
+        let nanos = Rc::new(Cell::new(0));
+        let writer = ChunkedWriter::new(
+            local_dest(tempfile::tempdir().unwrap().path()),
+            "vol".to_string(),
+            "20230101".to_string(),
+            4,
+            counter,
+            nanos.clone(),
+            nanos,
+        );
+
+        let chunks = writer.finish().unwrap();
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_write_subvolume_rolls_chunks_and_records_sizes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let counter = Rc::new(Cell::new(0));
+        let write_nanos = Rc::new(Cell::new(0));
+        let read_nanos = Rc::new(Cell::new(0));
+        let mut writer = ChunkedWriter::new(
+            local_dest(tmp.path()),
+            "vol".to_string(),
+            "20230101".to_string(),
+            5,
+            counter.clone(),
+            write_nanos,
+            read_nanos,
+        )
+        ;
+
+        writer.write_all(b"hello").unwrap();
+        counter.set(5);
+        writer.write_all(b"world").unwrap();
+        counter.set(10);
+        let chunks = writer.finish().unwrap();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].filename(), "part000001.btrfs.zstd");
+        assert_eq!(chunks[1].filename(), "part000002.btrfs.zstd");
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.raw_size()).collect::<Vec<_>>(),
+            vec![Some(5), Some(5)]
+        );
+        for chunk in &chunks {
+            assert!(chunk.size() > 0);
+            let path = tmp
+                .path()
+                .join("vol")
+                .join("20230101")
+                .join(chunk.filename());
+            assert!(path.is_file(), "missing chunk file {}", path.display());
+        }
+    }
+
+    #[test]
+    fn test_write_metadata_overwrites_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest_spec = local_dest(tmp.path());
+        let volume_dir = tmp.path().join("vol");
+        std::fs::create_dir_all(&volume_dir).unwrap();
+        std::fs::write(volume_dir.join(META_FILENAME), "stale").unwrap();
+
+        let meta = DestMeta::new(
+            1000,
+            2000,
+            vec![VolumeArchive {
+                timestamp: snap("20230101"),
+                parent_timestamp: None,
+                chunks: Vec::new(),
+            }],
+        );
+        write_metadata_to_dest(&dest_spec, "vol", &meta).unwrap();
+
+        let written = std::fs::read_to_string(volume_dir.join(META_FILENAME)).unwrap();
+        assert!(written.contains("first_sync_timestamp: 1000"));
+        assert!(written.contains("last_sync_timestamp: 2000"));
+        let loaded: DestMeta = serde_yaml::from_str(&written).unwrap();
+        assert_eq!(loaded.archives().len(), 1);
+        assert_eq!(loaded.archives()[0].timestamp.raw(), "20230101");
+        assert!(!volume_dir.join(".bbkar-meta.yaml.tmp").exists());
+    }
+}
