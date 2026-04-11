@@ -56,7 +56,11 @@ pub(crate) fn parse_timestamp_ymd(timestamp: &str) -> Option<(i64, i64, i64)> {
 pub(crate) fn day_number_from_ymd(year: i64, month: i64, day: i64) -> i64 {
     let adjust = if month <= 2 { 1 } else { 0 };
     let era_year = year - adjust;
-    let era = if era_year >= 0 { era_year } else { era_year - 399 } / 400;
+    let era = if era_year >= 0 {
+        era_year
+    } else {
+        era_year - 399
+    } / 400;
     let yoe = era_year - era * 400;
     let month_index = month + if month > 2 { -3 } else { 9 };
     let doy = (153 * month_index + 2) / 5 + day - 1;

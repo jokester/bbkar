@@ -253,8 +253,7 @@ mod tests {
 
     #[test]
     fn test_determine_execution_strategy_errors_when_non_interactive_and_no_sudo() {
-        let err =
-            determine_execution_strategy_with(|| false, || false, || Ok(false)).unwrap_err();
+        let err = determine_execution_strategy_with(|| false, || false, || Ok(false)).unwrap_err();
         let rendered = format!("{err}");
         assert!(rendered.contains("Cannot execute btrfs commands"));
         assert!(rendered.contains("Configure passwordless sudo"));
@@ -263,7 +262,9 @@ mod tests {
     #[test]
     fn test_ensure_sudo_authenticated_propagates_failure() {
         let err = ensure_sudo_authenticated_with(|| {
-            Err(BbkarError::Execution("Sudo authentication failed".to_string()))
+            Err(BbkarError::Execution(
+                "Sudo authentication failed".to_string(),
+            ))
         })
         .unwrap_err();
         assert!(format!("{err}").contains("Sudo authentication failed"));
@@ -283,7 +284,10 @@ mod tests {
         .unwrap();
 
         assert!(authenticated);
-        assert!(matches!(session.strategy, ExecutionStrategy::SudoInteractive));
+        assert!(matches!(
+            session.strategy,
+            ExecutionStrategy::SudoInteractive
+        ));
     }
 
     #[test]
@@ -317,7 +321,10 @@ mod tests {
         .unwrap();
 
         assert!(!authenticated);
-        assert!(matches!(session.strategy, ExecutionStrategy::SudoPasswordless));
+        assert!(matches!(
+            session.strategy,
+            ExecutionStrategy::SudoPasswordless
+        ));
     }
 
     #[test]
@@ -355,10 +362,16 @@ mod tests {
             strategy: ExecutionStrategy::SudoPasswordless,
         };
 
-        assert!(direct.ensure_active_with(|| Err(BbkarError::Execution("no".into())), Instant::now).is_ok());
-        assert!(passwordless
-            .ensure_active_with(|| Err(BbkarError::Execution("no".into())), Instant::now)
-            .is_ok());
+        assert!(
+            direct
+                .ensure_active_with(|| Err(BbkarError::Execution("no".into())), Instant::now)
+                .is_ok()
+        );
+        assert!(
+            passwordless
+                .ensure_active_with(|| Err(BbkarError::Execution("no".into())), Instant::now)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -420,7 +433,11 @@ mod tests {
 
         let err = session
             .ensure_active_with(
-                || Err(BbkarError::Execution("Failed to refresh sudo credentials".into())),
+                || {
+                    Err(BbkarError::Execution(
+                        "Failed to refresh sudo credentials".into(),
+                    ))
+                },
                 Instant::now,
             )
             .unwrap_err();

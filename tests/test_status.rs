@@ -1,9 +1,9 @@
 mod common;
 
-use std::collections::HashMap;
 use bbkar::model::dest::{DestMeta, DestState, VolumeArchive};
 use bbkar::model::source::{Series, Timestamp};
 use bbkar::service::executor::inspect_source::SourceState;
+use std::collections::HashMap;
 
 fn snap(name: &str) -> Timestamp {
     Timestamp::parse(name).unwrap()
@@ -34,7 +34,6 @@ fn dest_with(names: &[&str]) -> DestState {
         )),
     }
 }
-
 
 #[test]
 fn test_status_basic() {
@@ -102,7 +101,9 @@ fn test_status_basic() {
         text
     );
     assert!(
-        text.contains("next prune: keep 2 archive(s), prune 0 archive(s), required ancestor 0 archive(s)"),
+        text.contains(
+            "next prune: keep 2 archive(s), prune 0 archive(s), required ancestor 0 archive(s)"
+        ),
         "expected next prune summary in output, got:\n{}",
         text
     );
@@ -155,7 +156,9 @@ fn test_status_empty_dest() {
         text
     );
     assert!(
-        text.contains("next prune: keep 0 archive(s), prune 0 archive(s), required ancestor 0 archive(s)"),
+        text.contains(
+            "next prune: keep 0 archive(s), prune 0 archive(s), required ancestor 0 archive(s)"
+        ),
         "expected empty next prune summary in output, got:\n{}",
         text
     );
@@ -247,7 +250,9 @@ preserve_day_of_week = "monday"
         text
     );
     assert!(
-        text.contains("retention: keep all archives for 1w, then preserve 30d 12w 6m *y (week anchor: monday)"),
+        text.contains(
+            "retention: keep all archives for 1w, then preserve 30d 12w 6m *y (week anchor: monday)"
+        ),
         "expected custom retention policy in output, got:\n{}",
         text
     );

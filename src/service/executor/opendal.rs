@@ -263,7 +263,8 @@ mod tests {
         let op = summon_operator(&spec).unwrap();
 
         let data = OPENDAL_RUNTIME.block_on(async {
-            op.write("vol/meta.yaml", "hello".as_bytes().to_vec()).await?;
+            op.write("vol/meta.yaml", "hello".as_bytes().to_vec())
+                .await?;
             op.read("vol/meta.yaml").await
         });
 

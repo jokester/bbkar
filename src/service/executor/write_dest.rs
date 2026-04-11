@@ -427,8 +427,7 @@ mod tests {
             counter.clone(),
             write_nanos,
             read_nanos,
-        )
-        ;
+        );
 
         writer.write_all(b"hello").unwrap();
         counter.set(5);
@@ -440,7 +439,10 @@ mod tests {
         assert_eq!(chunks[0].filename(), "part000001.btrfs.zstd");
         assert_eq!(chunks[1].filename(), "part000002.btrfs.zstd");
         assert_eq!(
-            chunks.iter().map(|chunk| chunk.raw_size()).collect::<Vec<_>>(),
+            chunks
+                .iter()
+                .map(|chunk| chunk.raw_size())
+                .collect::<Vec<_>>(),
             vec![Some(5), Some(5)]
         );
         for chunk in &chunks {
@@ -573,7 +575,10 @@ mod tests {
         );
 
         let err = writer.write_all(b"hello").unwrap_err();
-        assert!(err.to_string().contains("Not a directory") || err.kind() == std::io::ErrorKind::NotADirectory);
+        assert!(
+            err.to_string().contains("Not a directory")
+                || err.kind() == std::io::ErrorKind::NotADirectory
+        );
     }
 
     #[test]
@@ -625,9 +630,7 @@ mod tests {
             "vol",
             "20230101",
             1,
-            Box::new(
-                vec![Err(BbkarError::Execution("send failed".into()))].into_iter(),
-            ),
+            Box::new(vec![Err(BbkarError::Execution("send failed".into()))].into_iter()),
         ) {
             Ok(_) => panic!("expected chunk error"),
             Err(err) => err,

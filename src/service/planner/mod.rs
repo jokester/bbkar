@@ -352,12 +352,22 @@ mod tests {
                 },
             ],
         );
-        let plan =
-            planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), DayNumber::from_ymd(2023, 1, 10));
+        let plan = planner.build_prune_plan_at(
+            Some(&meta),
+            &retention_policy_days(1),
+            DayNumber::from_ymd(2023, 1, 10),
+        );
 
-        assert!(matches!(plan.steps.first(), Some(PruneStep::CommitMetadata(_))));
-        assert!(matches!(plan.steps.get(1), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230101"));
-        assert!(matches!(plan.steps.get(2), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230102"));
+        assert!(matches!(
+            plan.steps.first(),
+            Some(PruneStep::CommitMetadata(_))
+        ));
+        assert!(
+            matches!(plan.steps.get(1), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230101")
+        );
+        assert!(
+            matches!(plan.steps.get(2), Some(PruneStep::DeleteArchive(a)) if a.timestamp.raw() == "20230102")
+        );
     }
 
     #[test]
@@ -372,8 +382,11 @@ mod tests {
                 chunks: vec![],
             }],
         );
-        let plan =
-            planner.build_prune_plan_at(Some(&meta), &retention_policy_days(1), DayNumber::from_ymd(2023, 1, 10));
+        let plan = planner.build_prune_plan_at(
+            Some(&meta),
+            &retention_policy_days(1),
+            DayNumber::from_ymd(2023, 1, 10),
+        );
 
         assert_eq!(plan.pruned_count(), 0);
         assert!(matches!(plan.decisions[0].reason, PruneReason::KeepAll));
@@ -391,8 +404,11 @@ mod tests {
                 chunks: vec![],
             }],
         );
-        let plan =
-            planner.build_prune_plan_at(Some(&meta), &retention_policy_all(), DayNumber::from_ymd(2023, 1, 10));
+        let plan = planner.build_prune_plan_at(
+            Some(&meta),
+            &retention_policy_all(),
+            DayNumber::from_ymd(2023, 1, 10),
+        );
 
         assert!(plan.steps.is_empty());
         assert_eq!(plan.kept_count(), 1);

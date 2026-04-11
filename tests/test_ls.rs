@@ -143,10 +143,7 @@ fn test_ls_marks_remote_archive_for_prune() {
     sources.insert("myvol".to_string(), source_state("myvol", &["20990110"]));
 
     let mut dests = HashMap::new();
-    dests.insert(
-        "myvol".to_string(),
-        dest_with(&["20230101", "20230110"]),
-    );
+    dests.insert("myvol".to_string(), dest_with(&["20230101", "20230110"]));
 
     let config_path = common::write_config_file(
         &tmp,
@@ -233,10 +230,9 @@ archive_preserve_min = "1d"
     bbkar::cli::ls(&config_path, None, None, Box::new(executor)).unwrap();
 
     assert!(
-        output
-            .lines()
-            .iter()
-            .any(|l| l.contains("20230101") && l.contains("remote-only") && l.contains("keep(required)")),
+        output.lines().iter().any(|l| l.contains("20230101")
+            && l.contains("remote-only")
+            && l.contains("keep(required)")),
         "expected ancestor archive to be kept as required, got:\n{}",
         output.text()
     );

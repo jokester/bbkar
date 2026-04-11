@@ -18,7 +18,11 @@ pub(crate) fn build_send_plan(
     dest_state: &DestState,
     send_policy: &SendPolicy,
 ) -> BR<RunPlan> {
-    let archives = dest_state.meta.as_ref().map(|m| m.archives()).unwrap_or(&[]);
+    let archives = dest_state
+        .meta
+        .as_ref()
+        .map(|m| m.archives())
+        .unwrap_or(&[]);
 
     let mut dest_set: HashSet<&str> = archives.iter().map(|a| a.timestamp.raw()).collect();
     let archive_map: HashMap<&str, _> = archives.iter().map(|a| (a.timestamp.raw(), a)).collect();
@@ -28,7 +32,12 @@ pub(crate) fn build_send_plan(
         compute_depth(a.timestamp.raw(), &archive_map, &mut depth_cache);
     }
 
-    let src_names: HashSet<&str> = src_state.volume.snapshots().iter().map(|s| s.raw()).collect();
+    let src_names: HashSet<&str> = src_state
+        .volume
+        .snapshots()
+        .iter()
+        .map(|s| s.raw())
+        .collect();
     let mut last_full: Option<&Timestamp> = archives
         .iter()
         .rev()
@@ -177,7 +186,9 @@ mod tests {
 
     fn policy(interval_days: u32, max_depth: Option<u32>) -> SendPolicy {
         SendPolicy {
-            min_full_send_interval: CalendarDuration { days: interval_days },
+            min_full_send_interval: CalendarDuration {
+                days: interval_days,
+            },
             max_incremental_depth: max_depth,
         }
     }
@@ -197,7 +208,8 @@ mod tests {
             )),
         };
 
-        let plan = build_send_plan("vol", &src, &dest_spec(), &dest_state, &policy(365, None)).unwrap();
+        let plan =
+            build_send_plan("vol", &src, &dest_spec(), &dest_state, &policy(365, None)).unwrap();
         assert_eq!(plan.steps.len(), 1);
         assert!(matches!(&plan.steps[0], RunStep::SendFull(ts) if ts.raw() == "20230103"));
     }
@@ -217,7 +229,8 @@ mod tests {
             )),
         };
 
-        let plan = build_send_plan("vol", &src, &dest_spec(), &dest_state, &policy(7, None)).unwrap();
+        let plan =
+            build_send_plan("vol", &src, &dest_spec(), &dest_state, &policy(7, None)).unwrap();
         assert_eq!(plan.steps.len(), 1);
         assert!(matches!(&plan.steps[0], RunStep::SendFull(ts) if ts.raw() == "badstamp2"));
     }

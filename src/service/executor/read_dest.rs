@@ -114,13 +114,7 @@ mod tests {
         }
     }
 
-    fn write_chunk(
-        root: &std::path::Path,
-        volume: &str,
-        snapshot: &str,
-        name: &str,
-        data: &[u8],
-    ) {
+    fn write_chunk(root: &std::path::Path, volume: &str, snapshot: &str, name: &str, data: &[u8]) {
         let dir = root.join(volume).join(snapshot);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(name), data).unwrap();
@@ -142,7 +136,13 @@ mod tests {
     #[test]
     fn test_read_single_chunk_stream() {
         let tmp = tempfile::tempdir().unwrap();
-        write_chunk(tmp.path(), "vol", "20230101", "part000001.btrfs.zstd", b"hello");
+        write_chunk(
+            tmp.path(),
+            "vol",
+            "20230101",
+            "part000001.btrfs.zstd",
+            b"hello",
+        );
         let spec = local_dest(tmp.path());
         let archive = archive("20230101", &["part000001.btrfs.zstd"]);
         let mut reader = ChunkStreamReader::new(&spec, "vol", &archive).unwrap();
@@ -156,8 +156,20 @@ mod tests {
     #[test]
     fn test_read_multiple_chunks_as_single_stream() {
         let tmp = tempfile::tempdir().unwrap();
-        write_chunk(tmp.path(), "vol", "20230101", "part000001.btrfs.zstd", b"hello ");
-        write_chunk(tmp.path(), "vol", "20230101", "part000002.btrfs.zstd", b"world");
+        write_chunk(
+            tmp.path(),
+            "vol",
+            "20230101",
+            "part000001.btrfs.zstd",
+            b"hello ",
+        );
+        write_chunk(
+            tmp.path(),
+            "vol",
+            "20230101",
+            "part000002.btrfs.zstd",
+            b"world",
+        );
         let spec = local_dest(tmp.path());
         let archive = archive(
             "20230101",

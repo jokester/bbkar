@@ -1,8 +1,8 @@
 use crate::model::config::SyncSpec;
+use crate::utils::duration::{CalendarDuration, PreserveSchedule, Weekday};
 use crate::utils::format::{
     format_calendar_days, format_preserve_count, format_time_unit, format_weekday,
 };
-use crate::utils::duration::{CalendarDuration, PreserveSchedule, Weekday};
 
 /// Controls how new snapshots are sent (full vs incremental).
 #[derive(Debug, Clone)]

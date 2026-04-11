@@ -301,9 +301,7 @@ mod tests {
         result
     }
 
-    fn next_chunk(
-        iter: &mut Box<dyn Iterator<Item = BR<BtrfsSendChunk>>>,
-    ) -> BtrfsSendChunk {
+    fn next_chunk(iter: &mut Box<dyn Iterator<Item = BR<BtrfsSendChunk>>>) -> BtrfsSendChunk {
         iter.next().unwrap().unwrap()
     }
 
@@ -345,9 +343,7 @@ mod tests {
 
         executor
             .ensure_sudo_with(
-                || {
-                    Ok(SudoSession::test_session(ExecutionStrategy::Direct))
-                },
+                || Ok(SudoSession::test_session(ExecutionStrategy::Direct)),
                 |_| Ok(()),
             )
             .unwrap();
@@ -436,10 +432,7 @@ mod tests {
     fn test_read_subvolume_full_yields_stream_from_fake_btrfs() {
         with_fake_path(
             |bin_dir| {
-                write_executable(
-                    &bin_dir.join("btrfs"),
-                    "#!/bin/sh\nprintf 'full-stream'\n",
-                );
+                write_executable(&bin_dir.join("btrfs"), "#!/bin/sh\nprintf 'full-stream'\n");
             },
             || {
                 let executor = RealExecutor {
@@ -526,7 +519,8 @@ mod tests {
                         path: dest_root.to_string_lossy().into_owned(),
                     },
                 };
-                let payload = zstd::stream::encode_all(Cursor::new(b"restored payload"), 0).unwrap();
+                let payload =
+                    zstd::stream::encode_all(Cursor::new(b"restored payload"), 0).unwrap();
                 let snapshot_dir = dest_root.join("vol").join("20230101");
                 std::fs::create_dir_all(&snapshot_dir).unwrap();
                 std::fs::write(snapshot_dir.join("part000001.btrfs.zstd"), payload).unwrap();
@@ -552,12 +546,7 @@ mod tests {
                 };
 
                 executor
-                    .restore_archive(
-                        &dest_spec,
-                        "vol",
-                        &archive,
-                        receive_root.to_str().unwrap(),
-                    )
+                    .restore_archive(&dest_spec, "vol", &archive, receive_root.to_str().unwrap())
                     .unwrap();
 
                 let restored = std::fs::read(receive_root.join("restored.bin")).unwrap();

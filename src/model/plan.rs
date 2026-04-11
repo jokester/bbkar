@@ -1,5 +1,5 @@
-use crate::model::dest::{DestMeta, VolumeArchive};
 use crate::Timestamp;
+use crate::model::dest::{DestMeta, VolumeArchive};
 
 pub struct RunPlan {
     pub steps: Vec<RunStep>,

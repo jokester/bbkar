@@ -229,7 +229,10 @@ fn test_dryrestore_defaults_to_latest_target() {
             meta: Some(DestMeta::new(
                 1000,
                 2000,
-                vec![archive("20230101", None), archive("20230102", Some("20230101"))],
+                vec![
+                    archive("20230101", None),
+                    archive("20230102", Some("20230101")),
+                ],
             )),
         },
     );
@@ -318,7 +321,9 @@ fn test_restore_replays_chain_and_skips_preexisting() {
 
     let text = output.text();
     assert!(text.contains("receiving full 20230101"));
-    assert!(text.contains("Warning:   skipping myvol.20230102 (already exists in root before restore, assuming valid)"));
+    assert!(text.contains(
+        "Warning:   skipping myvol.20230102 (already exists in root before restore, assuming valid)"
+    ));
     assert!(text.contains("receiving incremental 20230103"));
     assert!(text.contains("restore complete"));
 }

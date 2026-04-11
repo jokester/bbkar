@@ -667,16 +667,26 @@ dest = "dst1"
 "#;
         let errors = expect_config_errors(content);
 
-        assert!(errors.iter().any(|e| e.contains("global.compression must be \"zstd\"")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("global.max_backup_chunk_size must be in range 1..=2048")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("global.btrfs_send_concurrency must be 1")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("global.write_archive_concurrency must be 1")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("global.compression must be \"zstd\""))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("global.max_backup_chunk_size must be in range 1..=2048"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("global.btrfs_send_concurrency must be 1"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("global.write_archive_concurrency must be 1"))
+        );
     }
 
     #[test]
@@ -701,27 +711,39 @@ preserve_day_of_week = "funday"
 "#;
         let errors = expect_config_errors(content);
 
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.source refers to unknown source")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.dest refers to unknown dest")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.min_full_send_interval: invalid duration")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.max_incremental_depth must be >= 1")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.archive_preserve_min: must be \"all\" or valid duration")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.archive_preserve: invalid schedule")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("sync.main.preserve_day_of_week: invalid weekday")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("sync.main.source refers to unknown source"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("sync.main.dest refers to unknown dest"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("sync.main.min_full_send_interval: invalid duration"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("sync.main.max_incremental_depth must be >= 1"))
+        );
+        assert!(errors.iter().any(|e| {
+            e.contains("sync.main.archive_preserve_min: must be \"all\" or valid duration")
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("sync.main.archive_preserve: invalid schedule"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("sync.main.preserve_day_of_week: invalid weekday"))
+        );
     }
 
     #[test]
@@ -752,8 +774,20 @@ dest = "dst2"
 "#;
         let errors = expect_config_errors(content);
 
-        assert!(errors.iter().any(|e| e.contains("at most 1 source is supported")));
-        assert!(errors.iter().any(|e| e.contains("at most 1 dest is supported")));
-        assert!(errors.iter().any(|e| e.contains("at most 1 sync is supported")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("at most 1 source is supported"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("at most 1 dest is supported"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("at most 1 sync is supported"))
+        );
     }
 }

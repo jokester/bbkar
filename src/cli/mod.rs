@@ -493,14 +493,19 @@ filter = [{}]
         let calls = calls.into_inner();
         assert_eq!(calls.len(), 3);
         assert!(calls[0].starts_with("start:main:/fake/source:/fake/dest:"));
-        assert_eq!(calls[1], "volume:main:db:full at least every 1w, no incremental depth limit");
+        assert_eq!(
+            calls[1],
+            "volume:main:db:full at least every 1w, no incremental depth limit"
+        );
         assert_eq!(calls[2], "end:main");
 
         let printed = printed.borrow();
         assert!(printed.iter().any(|line| line == "[sync.main]"));
-        assert!(printed
-            .iter()
-            .any(|line| line.contains("volume: /fake/source/db.* -> /fake/dest/db.*")));
+        assert!(
+            printed
+                .iter()
+                .any(|line| line.contains("volume: /fake/source/db.* -> /fake/dest/db.*"))
+        );
         assert!(!printed.iter().any(|line| line.contains("home.*")));
     }
 
@@ -576,7 +581,10 @@ filter = [{}]
         )
         .unwrap();
 
-        assert_eq!(seen.into_inner(), vec!["start:main", "volume:db", "end:main"]);
+        assert_eq!(
+            seen.into_inner(),
+            vec!["start:main", "volume:db", "end:main"]
+        );
     }
 
     #[test]

@@ -170,7 +170,13 @@ mod tests {
     }
 
     fn chunk(name: &str, size: u32, raw_size: Option<u64>) -> ChunkFilename {
-        ChunkFilename::new(name.to_string(), size, Some("zstd".to_string()), raw_size, None)
+        ChunkFilename::new(
+            name.to_string(),
+            size,
+            Some("zstd".to_string()),
+            raw_size,
+            None,
+        )
     }
 
     #[test]

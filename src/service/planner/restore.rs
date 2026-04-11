@@ -3,13 +3,18 @@ use crate::model::error::{BR, BbkarError};
 use crate::model::plan::{RestorePlan, RestoreStep};
 use crate::model::source::Timestamp;
 
-pub(crate) fn build_restore_plan(archives: &[VolumeArchive], target: &Timestamp) -> BR<RestorePlan> {
+pub(crate) fn build_restore_plan(
+    archives: &[VolumeArchive],
+    target: &Timestamp,
+) -> BR<RestorePlan> {
     let mut chain = Vec::new();
 
     let target_archive = archives
         .iter()
         .find(|a| a.timestamp == *target)
-        .ok_or_else(|| BbkarError::Plan(format!("snapshot '{}' not found in archives", target.raw())))?;
+        .ok_or_else(|| {
+            BbkarError::Plan(format!("snapshot '{}' not found in archives", target.raw()))
+        })?;
 
     chain.push(target_archive);
 
@@ -34,7 +39,10 @@ pub(crate) fn build_restore_plan(archives: &[VolumeArchive], target: &Timestamp)
         .into_iter()
         .map(|a| {
             if let Some(ref parent) = a.parent_timestamp {
-                RestoreStep::ReceiveIncremental(a.timestamp.clone(), Timestamp::parse(parent).unwrap())
+                RestoreStep::ReceiveIncremental(
+                    a.timestamp.clone(),
+                    Timestamp::parse(parent).unwrap(),
+                )
             } else {
                 RestoreStep::ReceiveFull(a.timestamp.clone())
             }
@@ -80,8 +88,12 @@ mod tests {
 
         assert_eq!(plan.steps.len(), 3);
         assert!(matches!(&plan.steps[0], RestoreStep::ReceiveFull(ts) if ts.raw() == "20230101"));
-        assert!(matches!(&plan.steps[1], RestoreStep::ReceiveIncremental(ts, parent) if ts.raw() == "20230102" && parent.raw() == "20230101"));
-        assert!(matches!(&plan.steps[2], RestoreStep::ReceiveIncremental(ts, parent) if ts.raw() == "20230103" && parent.raw() == "20230102"));
+        assert!(
+            matches!(&plan.steps[1], RestoreStep::ReceiveIncremental(ts, parent) if ts.raw() == "20230102" && parent.raw() == "20230101")
+        );
+        assert!(
+            matches!(&plan.steps[2], RestoreStep::ReceiveIncremental(ts, parent) if ts.raw() == "20230103" && parent.raw() == "20230102")
+        );
     }
 
     #[test]
@@ -92,7 +104,9 @@ mod tests {
             Err(err) => err,
         };
 
-        assert!(matches!(err, BbkarError::Plan(msg) if msg.contains("snapshot '20230102' not found")));
+        assert!(
+            matches!(err, BbkarError::Plan(msg) if msg.contains("snapshot '20230102' not found"))
+        );
     }
 
     #[test]
@@ -103,6 +117,8 @@ mod tests {
             Err(err) => err,
         };
 
-        assert!(matches!(err, BbkarError::Plan(msg) if msg.contains("parent snapshot '20230101' not found")));
+        assert!(
+            matches!(err, BbkarError::Plan(msg) if msg.contains("parent snapshot '20230101' not found"))
+        );
     }
 }

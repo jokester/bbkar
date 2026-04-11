@@ -96,7 +96,11 @@ mod tests {
     #[test]
     fn test_count_config_args_variants() {
         assert_eq!(
-            count_config_args(vec!["bbkar".to_string(), "--config".to_string(), "a.toml".to_string()]),
+            count_config_args(vec![
+                "bbkar".to_string(),
+                "--config".to_string(),
+                "a.toml".to_string()
+            ]),
             1
         );
         assert_eq!(
@@ -104,7 +108,11 @@ mod tests {
             1
         );
         assert_eq!(
-            count_config_args(vec!["bbkar".to_string(), "-c".to_string(), "a.toml".to_string()]),
+            count_config_args(vec![
+                "bbkar".to_string(),
+                "-c".to_string(),
+                "a.toml".to_string()
+            ]),
             1
         );
         assert_eq!(

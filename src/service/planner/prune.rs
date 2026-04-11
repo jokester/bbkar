@@ -7,7 +7,10 @@ use crate::utils::duration::{PreserveCount, TimeUnit, Weekday};
 
 use super::time::{DayNumber, parse_timestamp_ymd};
 
-pub(crate) fn build_prune_plan(meta: Option<&DestMeta>, retention_policy: &RetentionPolicy) -> PrunePlan {
+pub(crate) fn build_prune_plan(
+    meta: Option<&DestMeta>,
+    retention_policy: &RetentionPolicy,
+) -> PrunePlan {
     build_prune_plan_at(meta, retention_policy, DayNumber::today())
 }
 
@@ -68,7 +71,10 @@ pub(crate) fn build_prune_plan_at(
 
     for info in &archive_infos {
         if now_days.into_inner() - info.day_number.into_inner() < keep_min_days {
-            reasons.insert(info.archive.timestamp.raw().to_string(), PruneReason::TooNew);
+            reasons.insert(
+                info.archive.timestamp.raw().to_string(),
+                PruneReason::TooNew,
+            );
         }
     }
 
@@ -85,7 +91,8 @@ pub(crate) fn build_prune_plan_at(
         }
     }
 
-    let archive_map: HashMap<&str, &VolumeArchive> = archives.iter().map(|a| (a.timestamp.raw(), a)).collect();
+    let archive_map: HashMap<&str, &VolumeArchive> =
+        archives.iter().map(|a| (a.timestamp.raw(), a)).collect();
     let kept: Vec<String> = reasons.keys().cloned().collect();
     for raw in kept {
         mark_required_ancestors(&raw, &archive_map, &mut reasons);
@@ -140,11 +147,17 @@ fn apply_schedule_bucket(
     };
 
     for info in earliest_per_period.values() {
-        reasons.entry(info.archive.timestamp.raw().to_string()).or_insert(reason.clone());
+        reasons
+            .entry(info.archive.timestamp.raw().to_string())
+            .or_insert(reason.clone());
     }
 }
 
-fn period_key_for_archive(info: &ArchiveInfo<'_>, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
+fn period_key_for_archive(
+    info: &ArchiveInfo<'_>,
+    unit: TimeUnit,
+    preserve_day_of_week: Weekday,
+) -> i64 {
     match unit {
         TimeUnit::Day => info.day_number.into_inner(),
         TimeUnit::Week => period_key_from_day(info.day_number, unit, preserve_day_of_week),
@@ -153,7 +166,11 @@ fn period_key_for_archive(info: &ArchiveInfo<'_>, unit: TimeUnit, preserve_day_o
     }
 }
 
-fn period_key_from_day(day_number: DayNumber, unit: TimeUnit, preserve_day_of_week: Weekday) -> i64 {
+fn period_key_from_day(
+    day_number: DayNumber,
+    unit: TimeUnit,
+    preserve_day_of_week: Weekday,
+) -> i64 {
     match unit {
         TimeUnit::Day => day_number.into_inner(),
         TimeUnit::Week => {
@@ -171,7 +188,8 @@ fn current_period_key(now_days: DayNumber, unit: TimeUnit, preserve_day_of_week:
         TimeUnit::Day | TimeUnit::Week => period_key_from_day(now_days, unit, preserve_day_of_week),
         TimeUnit::Month | TimeUnit::Year => {
             let timestamp = now_days.to_ymd_string();
-            let (year, month, _day) = parse_timestamp_ymd(&timestamp).expect("current day should be representable");
+            let (year, month, _day) =
+                parse_timestamp_ymd(&timestamp).expect("current day should be representable");
             match unit {
                 TimeUnit::Month => year * 12 + (month - 1),
                 TimeUnit::Year => year,
@@ -233,16 +251,32 @@ fn finalize_prune_plan(meta: &DestMeta, mut reasons: HashMap<String, PruneReason
         .archives()
         .iter()
         .zip(decisions.iter())
-        .filter_map(|(archive, decision)| if decision.would_prune() { None } else { Some(archive.clone()) })
+        .filter_map(|(archive, decision)| {
+            if decision.would_prune() {
+                None
+            } else {
+                Some(archive.clone())
+            }
+        })
         .collect();
     let pruned_archives: Vec<VolumeArchive> = meta
         .archives()
         .iter()
         .zip(decisions.iter())
-        .filter_map(|(archive, decision)| if decision.would_prune() { Some(archive.clone()) } else { None })
+        .filter_map(|(archive, decision)| {
+            if decision.would_prune() {
+                Some(archive.clone())
+            } else {
+                None
+            }
+        })
         .collect();
 
-    let resulting_meta = DestMeta::new(meta.first_sync_timestamp, meta.last_sync_timestamp, kept_archives);
+    let resulting_meta = DestMeta::new(
+        meta.first_sync_timestamp,
+        meta.last_sync_timestamp,
+        kept_archives,
+    );
 
     let mut steps = Vec::new();
     if !pruned_archives.is_empty() {

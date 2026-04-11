@@ -70,7 +70,10 @@ mod tests {
             BbkarError::Config(vec!["bad config".to_string()]).to_string(),
             "Configuration Error: [\n    \"bad config\",\n]"
         );
-        assert_eq!(BbkarError::Plan("bad plan".to_string()).to_string(), "Plan Error: bad plan");
+        assert_eq!(
+            BbkarError::Plan("bad plan".to_string()).to_string(),
+            "Plan Error: bad plan"
+        );
         assert_eq!(
             BbkarError::Execution("bad exec".to_string()).to_string(),
             "Execution Error: bad exec"

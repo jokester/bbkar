@@ -359,7 +359,10 @@ mod tests {
 
     #[test]
     fn test_resolve_targets_defaults_to_latest() {
-        let archives = vec![archive("20230101", None), archive("20230103", Some("20230101"))];
+        let archives = vec![
+            archive("20230101", None),
+            archive("20230103", Some("20230101")),
+        ];
         let targets = resolve_targets(&archives, &[], None, None).unwrap();
 
         assert_eq!(targets.len(), 1);
@@ -377,7 +380,10 @@ mod tests {
         let targets =
             resolve_targets(&archives, &snapshots, Some("20230102"), Some("20230103")).unwrap();
 
-        assert_eq!(targets.iter().map(|t| t.raw()).collect::<Vec<_>>(), vec!["20230102", "20230103"]);
+        assert_eq!(
+            targets.iter().map(|t| t.raw()).collect::<Vec<_>>(),
+            vec!["20230102", "20230103"]
+        );
     }
 
     #[test]
@@ -388,7 +394,9 @@ mod tests {
             Err(err) => err,
         };
 
-        assert!(matches!(err, BbkarError::Execution(msg) if msg.contains("snapshot '20230102' not found")));
+        assert!(
+            matches!(err, BbkarError::Execution(msg) if msg.contains("snapshot '20230102' not found"))
+        );
     }
 
     #[test]

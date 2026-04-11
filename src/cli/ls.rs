@@ -27,7 +27,8 @@ pub fn ls(
     } else {
         super::for_each_volume(config_path, &*executor, name, |ctx| {
             let dest_state = executor.inspect_dest_volume(ctx.dest_spec, ctx.volume)?;
-            let prune_plan = planner.build_prune_plan(dest_state.meta.as_ref(), &ctx.retention_policy);
+            let prune_plan =
+                planner.build_prune_plan(dest_state.meta.as_ref(), &ctx.retention_policy);
             print_snapshot_table(
                 &*executor,
                 ctx.volume,
