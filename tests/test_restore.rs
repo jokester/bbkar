@@ -383,3 +383,149 @@ fn test_restore_deduplicates_steps_for_multiple_targets() {
         ]
     );
 }
+
+#[test]
+fn test_dryrestore_errors_for_unknown_sync_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let restore_root = tmp.path().join("restore-root");
+    std::fs::create_dir_all(&restore_root).unwrap();
+
+    let config_path = common::make_config_file(
+        &tmp,
+        "src1",
+        "/fake/source",
+        "dst1",
+        "/fake/dest",
+        &["myvol"],
+    );
+
+    let (executor, _output) = common::MockExecutor::new(HashMap::new(), HashMap::new(), 0);
+    let err = bbkar::cli::dryrestore(
+        &config_path,
+        restore_root.to_str().unwrap(),
+        "myvol",
+        &[],
+        None,
+        None,
+        Some("missing"),
+        Box::new(executor),
+    )
+    .unwrap_err();
+
+    let rendered = format!("{err}");
+    assert!(rendered.contains("sync 'missing' not found in config"));
+    assert!(rendered.contains("available: main"));
+}
+
+#[test]
+fn test_dryrestore_assumes_single_sync_when_name_is_omitted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let restore_root = tmp.path().join("restore-root");
+    std::fs::create_dir_all(&restore_root).unwrap();
+
+    let mut sources = HashMap::new();
+    sources.insert("myvol".to_string(), source_state("myvol", &["20230101"]));
+
+    let mut dests = HashMap::new();
+    dests.insert(
+        "myvol".to_string(),
+        DestState {
+            meta: Some(DestMeta::new(1000, 2000, vec![archive("20230101", None)])),
+        },
+    );
+
+    let config_path = common::make_config_file(
+        &tmp,
+        "src1",
+        "/fake/source",
+        "dst1",
+        "/fake/dest",
+        &["myvol"],
+    );
+
+    let (executor, output) = common::MockExecutor::new(sources, dests, 0);
+    bbkar::cli::dryrestore(
+        &config_path,
+        restore_root.to_str().unwrap(),
+        "myvol",
+        &[],
+        None,
+        None,
+        None,
+        Box::new(executor),
+    )
+    .unwrap();
+
+    assert!(
+        output
+            .text()
+            .contains("assuming --name=main as only 1 [sync] exists")
+    );
+}
+
+#[test]
+fn test_restore_errors_when_volume_has_no_archives() {
+    let tmp = tempfile::tempdir().unwrap();
+    let restore_root = tmp.path().join("restore-root");
+    std::fs::create_dir_all(&restore_root).unwrap();
+
+    let mut sources = HashMap::new();
+    sources.insert("myvol".to_string(), source_state("myvol", &["20230101"]));
+
+    let dests = HashMap::new();
+
+    let config_path = common::make_config_file(
+        &tmp,
+        "src1",
+        "/fake/source",
+        "dst1",
+        "/fake/dest",
+        &["myvol"],
+    );
+
+    let (executor, _output, _restored) = RestoreExecutor::new(sources, dests);
+    let err = bbkar::cli::restore(
+        &config_path,
+        restore_root.to_str().unwrap(),
+        "myvol",
+        &[],
+        None,
+        None,
+        None,
+        Box::new(executor),
+    )
+    .unwrap_err();
+
+    assert!(format!("{err}").contains("no archives found for volume 'myvol'"));
+}
+
+#[test]
+fn test_restore_errors_when_requested_volume_is_missing_from_dest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let restore_root = tmp.path().join("restore-root");
+    std::fs::create_dir_all(&restore_root).unwrap();
+
+    let config_path = common::make_config_file(
+        &tmp,
+        "src1",
+        "/fake/source",
+        "dst1",
+        "/fake/dest",
+        &["myvol"],
+    );
+
+    let (executor, _output, _restored) = RestoreExecutor::new(HashMap::new(), HashMap::new());
+    let err = bbkar::cli::restore(
+        &config_path,
+        restore_root.to_str().unwrap(),
+        "missingvol",
+        &[],
+        None,
+        None,
+        None,
+        Box::new(executor),
+    )
+    .unwrap_err();
+
+    assert!(format!("{err}").contains("no archives found for volume 'missingvol'"));
+}

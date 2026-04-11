@@ -1,7 +1,6 @@
 mod common;
 
 use std::collections::HashMap;
-
 use bbkar::model::dest::{DestMeta, DestState, VolumeArchive};
 use bbkar::model::source::{Series, Timestamp};
 use bbkar::service::executor::inspect_source::SourceState;
@@ -35,6 +34,7 @@ fn dest_with(names: &[&str]) -> DestState {
         )),
     }
 }
+
 
 #[test]
 fn test_status_basic() {
@@ -251,4 +251,36 @@ preserve_day_of_week = "monday"
         "expected custom retention policy in output, got:\n{}",
         text
     );
+}
+
+#[test]
+fn test_status_rejects_multiple_syncs_in_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = common::write_config_file(
+        &tmp,
+        r#"[global]
+
+[source.src1]
+path = "/fake/source"
+
+[dest.dst1]
+driver = "local"
+path = "/fake/dest"
+
+[sync.one]
+source = "src1"
+dest = "dst1"
+filter = ["db*"]
+
+[sync.two]
+source = "src1"
+dest = "dst1"
+filter = ["home*"]
+"#,
+    );
+
+    let (executor, _output) = common::MockExecutor::new(HashMap::new(), HashMap::new(), 0);
+    let err = bbkar::cli::status(&config_path, None, Box::new(executor)).unwrap_err();
+    let rendered = format!("{err}");
+    assert!(rendered.contains("at most 1 sync is supported, got 2"));
 }

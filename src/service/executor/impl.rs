@@ -247,13 +247,64 @@ mod tests {
     use crate::service::executor::sudo::ExecutionStrategy;
     use std::ffi::OsStr;
     use std::io::Cursor;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::process::Stdio;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn args_of(command: &Command) -> Vec<String> {
         command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect()
+    }
+
+    fn write_executable(path: &Path, script: &str) {
+        std::fs::write(path, script).unwrap();
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    fn with_fake_path<T>(make_bin_dir: impl FnOnce(&Path), f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().unwrap();
+        let bin_dir = tempfile::tempdir().unwrap();
+        make_bin_dir(bin_dir.path());
+        let old_path = std::env::var_os("PATH");
+        let new_path = match &old_path {
+            Some(existing) => {
+                let mut joined = std::ffi::OsString::from(bin_dir.path());
+                joined.push(":");
+                joined.push(existing);
+                joined
+            }
+            None => std::ffi::OsString::from(bin_dir.path()),
+        };
+
+        // Test-only PATH override to route spawned btrfs/sudo commands to local shims.
+        unsafe {
+            std::env::set_var("PATH", &new_path);
+        }
+        let result = f();
+        unsafe {
+            match old_path {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        result
+    }
+
+    fn next_chunk(
+        iter: &mut Box<dyn Iterator<Item = BR<BtrfsSendChunk>>>,
+    ) -> BtrfsSendChunk {
+        iter.next().unwrap().unwrap()
     }
 
     #[test]
@@ -364,5 +415,154 @@ mod tests {
 
         let rendered = format!("{err}");
         assert!(rendered.contains("btrfs receive failed (exit 7): bad"));
+    }
+
+    #[test]
+    fn test_pipe_restore_stream_surfaces_input_io_error() {
+        struct FailingReader;
+
+        impl Read for FailingReader {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("boom"))
+            }
+        }
+
+        let mut child = shell_child("cat >/dev/null");
+        let err = pipe_restore_stream(&mut FailingReader, &mut child).unwrap_err();
+        assert!(matches!(err, BbkarError::Io(_)));
+    }
+
+    #[test]
+    fn test_read_subvolume_full_yields_stream_from_fake_btrfs() {
+        with_fake_path(
+            |bin_dir| {
+                write_executable(
+                    &bin_dir.join("btrfs"),
+                    "#!/bin/sh\nprintf 'full-stream'\n",
+                );
+            },
+            || {
+                let executor = RealExecutor {
+                    sudo_session: RefCell::new(Some(SudoSession::test_session(
+                        ExecutionStrategy::Direct,
+                    ))),
+                };
+                let mut iter = executor.read_subvolume_full(
+                    SourceSpec {
+                        path: "/source".into(),
+                        filter: vec!["*".into()],
+                    },
+                    "snap-1",
+                );
+
+                match next_chunk(&mut iter) {
+                    BtrfsSendChunk::StdoutBytes(bytes, offset) => {
+                        assert_eq!(bytes, b"full-stream");
+                        assert_eq!(offset, 0);
+                    }
+                    _ => panic!("unexpected first chunk kind"),
+                }
+                match next_chunk(&mut iter) {
+                    BtrfsSendChunk::ProcessExit(code, stderr) => {
+                        assert_eq!(code, 0);
+                        assert_eq!(stderr, "");
+                    }
+                    _ => panic!("unexpected exit chunk kind"),
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn test_read_subvolume_incremental_passes_parent_and_snapshot_to_fake_btrfs() {
+        with_fake_path(
+            |bin_dir| {
+                write_executable(
+                    &bin_dir.join("btrfs"),
+                    "#!/bin/sh\nprintf '%s|%s|%s' \"$1\" \"$2\" \"$3\"\n",
+                );
+            },
+            || {
+                let executor = RealExecutor {
+                    sudo_session: RefCell::new(Some(SudoSession::test_session(
+                        ExecutionStrategy::Direct,
+                    ))),
+                };
+                let mut iter = executor.read_subvolume_incremental(
+                    SourceSpec {
+                        path: "/source".into(),
+                        filter: vec!["*".into()],
+                    },
+                    "snap-2",
+                    "snap-1",
+                );
+
+                match next_chunk(&mut iter) {
+                    BtrfsSendChunk::StdoutBytes(bytes, _) => {
+                        assert_eq!(bytes, b"send|-p|/source/snap-1");
+                    }
+                    _ => panic!("unexpected first chunk kind"),
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn test_restore_archive_restores_via_fake_btrfs_receive() {
+        with_fake_path(
+            |bin_dir| {
+                write_executable(
+                    &bin_dir.join("btrfs"),
+                    "#!/bin/sh\nif [ \"$1\" = \"receive\" ]; then cat > \"$2/restored.bin\"; else exit 99; fi\n",
+                );
+            },
+            || {
+                let tmp = tempfile::tempdir().unwrap();
+                let dest_root = tmp.path().join("dest");
+                let receive_root = tmp.path().join("recv");
+                std::fs::create_dir_all(&receive_root).unwrap();
+                let dest_spec = DestSpec {
+                    backend_spec: crate::model::config::BackendSpec::Local {
+                        path: dest_root.to_string_lossy().into_owned(),
+                    },
+                };
+                let payload = zstd::stream::encode_all(Cursor::new(b"restored payload"), 0).unwrap();
+                let snapshot_dir = dest_root.join("vol").join("20230101");
+                std::fs::create_dir_all(&snapshot_dir).unwrap();
+                std::fs::write(snapshot_dir.join("part000001.btrfs.zstd"), payload).unwrap();
+                let archive = VolumeArchive {
+                    timestamp: crate::model::source::Timestamp::parse("20230101").unwrap(),
+                    parent_timestamp: None,
+                    chunks: vec![ChunkFilename::new(
+                        "part000001.btrfs.zstd".into(),
+                        snapshot_dir
+                            .join("part000001.btrfs.zstd")
+                            .metadata()
+                            .unwrap()
+                            .len() as u32,
+                        Some("zstd".into()),
+                        Some(16),
+                        Some("deadbeef".into()),
+                    )],
+                };
+                let executor = RealExecutor {
+                    sudo_session: RefCell::new(Some(SudoSession::test_session(
+                        ExecutionStrategy::Direct,
+                    ))),
+                };
+
+                executor
+                    .restore_archive(
+                        &dest_spec,
+                        "vol",
+                        &archive,
+                        receive_root.to_str().unwrap(),
+                    )
+                    .unwrap();
+
+                let restored = std::fs::read(receive_root.join("restored.bin")).unwrap();
+                assert_eq!(restored, b"restored payload");
+            },
+        );
     }
 }

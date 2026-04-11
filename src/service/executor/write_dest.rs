@@ -455,6 +455,68 @@ mod tests {
     }
 
     #[test]
+    fn test_chunked_writer_flush_is_ok_without_open_file() {
+        let nanos = Rc::new(Cell::new(0));
+        let mut writer = ChunkedWriter::new(
+            local_dest(tempfile::tempdir().unwrap().path()),
+            "vol".to_string(),
+            "20230101".to_string(),
+            5,
+            Rc::new(Cell::new(0)),
+            nanos.clone(),
+            nanos,
+        );
+
+        writer.flush().unwrap();
+    }
+
+    #[test]
+    fn test_chunked_writer_flush_is_ok_with_open_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let counter = Rc::new(Cell::new(0));
+        let nanos = Rc::new(Cell::new(0));
+        let mut writer = ChunkedWriter::new(
+            local_dest(tmp.path()),
+            "vol".to_string(),
+            "20230101".to_string(),
+            5,
+            counter.clone(),
+            nanos.clone(),
+            nanos,
+        );
+
+        writer.write_all(b"hello").unwrap();
+        counter.set(5);
+        writer.flush().unwrap();
+    }
+
+    #[test]
+    fn test_chunked_writer_rolls_only_on_write_after_exact_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let counter = Rc::new(Cell::new(0));
+        let nanos = Rc::new(Cell::new(0));
+        let mut writer = ChunkedWriter::new(
+            local_dest(tmp.path()),
+            "vol".to_string(),
+            "20230101".to_string(),
+            5,
+            counter.clone(),
+            nanos.clone(),
+            nanos,
+        );
+
+        writer.write_all(b"hello").unwrap();
+        counter.set(5);
+        writer.write_all(b"!").unwrap();
+        counter.set(6);
+        let chunks = writer.finish().unwrap();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].raw_size(), Some(5));
+        assert_eq!(chunks[1].raw_size(), Some(1));
+    }
+
+    #[test]
     fn test_write_metadata_overwrites_existing_file() {
         let tmp = tempfile::tempdir().unwrap();
         let dest_spec = local_dest(tmp.path());
@@ -480,5 +542,97 @@ mod tests {
         assert_eq!(loaded.archives().len(), 1);
         assert_eq!(loaded.archives()[0].timestamp.raw(), "20230101");
         assert!(!volume_dir.join(".bbkar-meta.yaml.tmp").exists());
+    }
+
+    #[test]
+    fn test_write_metadata_creates_missing_volume_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest_spec = local_dest(tmp.path());
+        let meta = DestMeta::new(1, 2, Vec::new());
+
+        write_metadata_to_dest(&dest_spec, "nested-vol", &meta).unwrap();
+
+        assert!(tmp.path().join("nested-vol").join(META_FILENAME).is_file());
+    }
+
+    #[test]
+    fn test_chunked_writer_write_errors_when_snapshot_parent_is_a_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blocking_path = tmp.path().join("vol");
+        std::fs::write(&blocking_path, "not a directory").unwrap();
+
+        let nanos = Rc::new(Cell::new(0));
+        let mut writer = ChunkedWriter::new(
+            local_dest(tmp.path()),
+            "vol".to_string(),
+            "20230101".to_string(),
+            5,
+            Rc::new(Cell::new(0)),
+            nanos.clone(),
+            nanos,
+        );
+
+        let err = writer.write_all(b"hello").unwrap_err();
+        assert!(err.to_string().contains("Not a directory") || err.kind() == std::io::ErrorKind::NotADirectory);
+    }
+
+    #[test]
+    fn test_write_metadata_errors_when_volume_parent_is_a_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest_spec = local_dest(tmp.path());
+        std::fs::write(tmp.path().join("vol"), "not a directory").unwrap();
+        let meta = DestMeta::new(1, 2, Vec::new());
+
+        let err = write_metadata_to_dest(&dest_spec, "vol", &meta).unwrap_err();
+        assert!(matches!(err, BbkarError::Io(_)));
+    }
+
+    #[test]
+    fn test_timed_iterator_returns_none_without_advancing() {
+        let nanos = Rc::new(Cell::new(0));
+        let mut iter = TimedIterator::new(Box::new(std::iter::empty()), nanos.clone());
+
+        assert!(iter.next().is_none());
+        assert!(nanos.get() > 0);
+    }
+
+    #[test]
+    fn test_write_subvolume_to_dest_handles_empty_stream() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest_spec = local_dest(tmp.path());
+        let (chunks, stats) = write_subvolume_to_dest(
+            &dest_spec,
+            "vol",
+            "20230101",
+            1,
+            Box::new(vec![Ok(BtrfsSendChunk::ProcessExit(0, String::new()))].into_iter()),
+        )
+        .unwrap();
+
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].raw_size(), Some(0));
+        assert!(chunks[0].size() > 0);
+        assert_eq!(stats.raw_bytes, 0);
+        assert_eq!(stats.compressed_bytes, chunks[0].size() as u64);
+    }
+
+    #[test]
+    fn test_write_subvolume_to_dest_propagates_chunk_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest_spec = local_dest(tmp.path());
+        let err = match write_subvolume_to_dest(
+            &dest_spec,
+            "vol",
+            "20230101",
+            1,
+            Box::new(
+                vec![Err(BbkarError::Execution("send failed".into()))].into_iter(),
+            ),
+        ) {
+            Ok(_) => panic!("expected chunk error"),
+            Err(err) => err,
+        };
+
+        assert!(format!("{err}").contains("send failed"));
     }
 }

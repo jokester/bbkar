@@ -290,3 +290,97 @@ fn test_ls_restore_root_mode_keeps_restore_table_shape() {
     assert!(text.contains("20230102") && text.contains("not-restored"));
     assert!(text.contains("20230103") && text.contains("restored-only"));
 }
+
+#[test]
+fn test_ls_restore_root_requires_name_when_multiple_syncs_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = common::write_config_file(
+        &tmp,
+        r#"[global]
+
+[source.src1]
+path = "/fake/source"
+
+[dest.dst1]
+driver = "local"
+path = "/fake/dest"
+
+[sync.one]
+source = "src1"
+dest = "dst1"
+filter = ["vol1"]
+
+[sync.two]
+source = "src1"
+dest = "dst1"
+filter = ["vol2"]
+"#,
+    );
+
+    let (executor, _output) = common::MockExecutor::new(HashMap::new(), HashMap::new(), 0);
+    let err = bbkar::cli::ls(
+        &config_path,
+        None,
+        Some(tmp.path().to_str().unwrap()),
+        Box::new(executor),
+    )
+    .unwrap_err();
+
+    let rendered = format!("{err}");
+    assert!(rendered.contains("at most 1 sync is supported, got 2"));
+}
+
+#[test]
+fn test_ls_restore_root_rejects_unknown_sync_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = common::make_config_file(
+        &tmp,
+        "src1",
+        "/fake/source",
+        "dst1",
+        "/fake/dest",
+        &["myvol"],
+    );
+
+    let (executor, _output) = common::MockExecutor::new(HashMap::new(), HashMap::new(), 0);
+    let err = bbkar::cli::ls(
+        &config_path,
+        Some("missing"),
+        Some(tmp.path().to_str().unwrap()),
+        Box::new(executor),
+    )
+    .unwrap_err();
+
+    let rendered = format!("{err}");
+    assert!(rendered.contains("sync 'missing' not found in config"));
+    assert!(rendered.contains("available: main"));
+}
+
+#[test]
+fn test_ls_restore_root_errors_when_no_sync_defined() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = common::write_config_file(
+        &tmp,
+        r#"[global]
+
+[source.src1]
+path = "/fake/source"
+
+[dest.dst1]
+driver = "local"
+path = "/fake/dest"
+"#,
+    );
+
+    let (executor, _output) = common::MockExecutor::new(HashMap::new(), HashMap::new(), 0);
+    let err = bbkar::cli::ls(
+        &config_path,
+        None,
+        Some(tmp.path().to_str().unwrap()),
+        Box::new(executor),
+    )
+    .unwrap_err();
+
+    let rendered = format!("{err}");
+    assert!(rendered.contains("missing field `sync`"));
+}

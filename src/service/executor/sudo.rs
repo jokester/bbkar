@@ -188,6 +188,50 @@ fn run_sudo_refresh() -> BR<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn write_executable(path: &Path, script: &str) {
+        std::fs::write(path, script).unwrap();
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    fn with_fake_sudo<T>(script: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().unwrap();
+        let bin_dir = tempfile::tempdir().unwrap();
+        write_executable(&bin_dir.path().join("sudo"), script);
+
+        let old_path = std::env::var_os("PATH");
+        let new_path = match &old_path {
+            Some(existing) => {
+                let mut joined = std::ffi::OsString::from(bin_dir.path());
+                joined.push(":");
+                joined.push(existing);
+                joined
+            }
+            None => std::ffi::OsString::from(bin_dir.path()),
+        };
+        unsafe {
+            std::env::set_var("PATH", &new_path);
+        }
+        let result = f();
+        unsafe {
+            match old_path {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        result
+    }
 
     #[test]
     fn test_determine_execution_strategy_direct_when_running_as_root() {
@@ -243,6 +287,40 @@ mod tests {
     }
 
     #[test]
+    fn test_new_with_skips_authentication_for_direct_strategy() {
+        let mut authenticated = false;
+        let session = SudoSession::new_with(
+            || Ok(ExecutionStrategy::Direct),
+            || {
+                authenticated = true;
+                Ok(())
+            },
+            Instant::now,
+        )
+        .unwrap();
+
+        assert!(!authenticated);
+        assert!(matches!(session.strategy, ExecutionStrategy::Direct));
+    }
+
+    #[test]
+    fn test_new_with_skips_authentication_for_passwordless_strategy() {
+        let mut authenticated = false;
+        let session = SudoSession::new_with(
+            || Ok(ExecutionStrategy::SudoPasswordless),
+            || {
+                authenticated = true;
+                Ok(())
+            },
+            Instant::now,
+        )
+        .unwrap();
+
+        assert!(!authenticated);
+        assert!(matches!(session.strategy, ExecutionStrategy::SudoPasswordless));
+    }
+
+    #[test]
     fn test_needs_sudo_only_for_non_direct_strategy() {
         let direct = SudoSession {
             last_refresh: Instant::now(),
@@ -257,6 +335,11 @@ mod tests {
 
         assert!(!direct.needs_sudo());
         assert!(sudo.needs_sudo());
+    }
+
+    #[test]
+    fn test_ensure_sudo_authenticated_succeeds() {
+        assert!(ensure_sudo_authenticated_with(|| Ok(())).is_ok());
     }
 
     #[test]
@@ -304,6 +387,30 @@ mod tests {
     }
 
     #[test]
+    fn test_ensure_active_does_not_refresh_before_interval() {
+        let start = Instant::now();
+        let mut refreshed = false;
+        let mut session = SudoSession {
+            last_refresh: start,
+            refresh_interval: Duration::from_secs(3600),
+            strategy: ExecutionStrategy::SudoInteractive,
+        };
+
+        session
+            .ensure_active_with(
+                || {
+                    refreshed = true;
+                    Ok(())
+                },
+                || start + Duration::from_secs(5),
+            )
+            .unwrap();
+
+        assert!(!refreshed);
+        assert_eq!(session.last_refresh, start);
+    }
+
+    #[test]
     fn test_ensure_active_propagates_refresh_failure() {
         let mut session = SudoSession {
             last_refresh: Instant::now() - Duration::from_secs(1200),
@@ -319,5 +426,61 @@ mod tests {
             .unwrap_err();
 
         assert!(format!("{err}").contains("Failed to refresh sudo credentials"));
+    }
+
+    #[test]
+    fn test_determine_execution_strategy_propagates_sudo_check_error() {
+        let err = determine_execution_strategy_with(
+            || false,
+            || true,
+            || Err(BbkarError::Execution("Failed to check sudo access".into())),
+        )
+        .unwrap_err();
+
+        assert!(format!("{err}").contains("Failed to check sudo access"));
+    }
+
+    #[test]
+    fn test_sudo_check_status_returns_true_on_success() {
+        with_fake_sudo("#!/bin/sh\nexit 0\n", || {
+            assert!(sudo_check_status().unwrap());
+        });
+    }
+
+    #[test]
+    fn test_sudo_check_status_returns_false_on_failure() {
+        with_fake_sudo("#!/bin/sh\nexit 1\n", || {
+            assert!(!sudo_check_status().unwrap());
+        });
+    }
+
+    #[test]
+    fn test_run_sudo_authenticate_succeeds() {
+        with_fake_sudo("#!/bin/sh\nexit 0\n", || {
+            assert!(run_sudo_authenticate().is_ok());
+        });
+    }
+
+    #[test]
+    fn test_run_sudo_authenticate_returns_execution_error_on_failure() {
+        with_fake_sudo("#!/bin/sh\nexit 1\n", || {
+            let err = run_sudo_authenticate().unwrap_err();
+            assert!(format!("{err}").contains("Sudo authentication failed"));
+        });
+    }
+
+    #[test]
+    fn test_run_sudo_refresh_succeeds() {
+        with_fake_sudo("#!/bin/sh\nexit 0\n", || {
+            assert!(run_sudo_refresh().is_ok());
+        });
+    }
+
+    #[test]
+    fn test_run_sudo_refresh_returns_execution_error_on_failure() {
+        with_fake_sudo("#!/bin/sh\nexit 1\n", || {
+            let err = run_sudo_refresh().unwrap_err();
+            assert!(format!("{err}").contains("Failed to refresh sudo credentials"));
+        });
     }
 }

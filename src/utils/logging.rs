@@ -183,4 +183,30 @@ mod tests {
         assert!(output.contains("DEBUG [bbkar::planner]"));
         assert!(output.contains("TRACE [bbkar::planner]"));
     }
+
+    #[test]
+    fn test_warn_and_error_events_include_ansi_prefixes() {
+        let output = capture_logs(true, || {
+            warn!(warning = "ansi warn");
+            error!(failure = "ansi error");
+        });
+
+        assert!(output.contains("\u{1b}[33mWARN\u{1b}[0m"));
+        assert!(output.contains("ansi warn"));
+        assert!(output.contains("\u{1b}[31mERROR\u{1b}[0m"));
+        assert!(output.contains("ansi error"));
+    }
+
+    #[test]
+    fn test_debug_and_trace_events_include_ansi_prefixes() {
+        let output = capture_logs(true, || {
+            debug!(target: "bbkar::planner", step = "ansi-plan");
+            trace!(target: "bbkar::planner", step = "ansi-trace");
+        });
+
+        assert!(output.contains("\u{1b}[34mDEBUG\u{1b}[0m [bbkar::planner]"));
+        assert!(output.contains("ansi-plan"));
+        assert!(output.contains("\u{1b}[90mTRACE\u{1b}[0m [bbkar::planner]"));
+        assert!(output.contains("ansi-trace"));
+    }
 }

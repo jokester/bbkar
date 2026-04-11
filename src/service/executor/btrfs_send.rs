@@ -74,6 +74,7 @@ impl Iterator for BtrfsSendIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::AsRawFd;
     use std::process::{Command, Stdio};
 
     fn shell_child(script: &str) -> std::process::Child {
@@ -171,6 +172,60 @@ mod tests {
             }
             other => panic!("unexpected second chunk: {}", chunk_kind(&other)),
         }
+    }
+
+    #[test]
+    fn test_iterator_reports_clean_exit_without_stdout() {
+        let child = shell_child("printf 'warn-only' >&2");
+        let mut iter = BtrfsSendIterator::new(child);
+
+        match iter.next().unwrap().unwrap() {
+            BtrfsSendChunk::ProcessExit(code, stderr) => {
+                assert_eq!(code, 0);
+                assert_eq!(stderr, "warn-only");
+            }
+            other => panic!("unexpected first chunk: {}", chunk_kind(&other)),
+        }
+
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_iterator_maps_signal_exit_to_code_one() {
+        let child = shell_child("kill -9 $$");
+        let mut iter = BtrfsSendIterator::new(child);
+
+        match iter.next().unwrap().unwrap() {
+            BtrfsSendChunk::ProcessExit(code, stderr) => {
+                assert_eq!(code, 1);
+                assert!(stderr.is_empty());
+            }
+            other => panic!("unexpected first chunk: {}", chunk_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn test_iterator_reports_stdout_read_error() {
+        let child = shell_child("sleep 1");
+        let mut iter = BtrfsSendIterator::new(child);
+
+        let fd = iter.stdout.get_ref().as_raw_fd();
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            assert!(flags >= 0);
+            assert_eq!(libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK), 0);
+        }
+
+        match iter.next().unwrap() {
+            Err(BbkarError::Io(_)) => {}
+            Ok(BtrfsSendChunk::StdoutBytes(_, _)) => panic!("unexpected stdout chunk"),
+            Ok(BtrfsSendChunk::ProcessExit(_, _)) => panic!("unexpected process exit"),
+            Err(other) => panic!("unexpected error: {other}"),
+        }
+
+        let _ = iter.child.kill();
+        let _ = iter.child.wait();
+        assert!(iter.next().is_none());
     }
 
     fn chunk_kind(chunk: &BtrfsSendChunk) -> &'static str {
