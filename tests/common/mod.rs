@@ -17,6 +17,11 @@ use bbkar::service::executor::write_dest::TransferStats;
 pub struct PrintedOutput(Arc<Mutex<Vec<String>>>);
 
 impl PrintedOutput {
+    #[allow(dead_code)]
+    pub fn from_shared(lines: Arc<Mutex<Vec<String>>>) -> Self {
+        Self(lines)
+    }
+
     pub fn lines(&self) -> Vec<String> {
         self.0.lock().unwrap().clone()
     }
@@ -190,6 +195,14 @@ filter = [{filter}]
         dest_path = dest_path,
         filter = filter_toml.join(", "),
     );
+    let path = dir.path().join("config.toml");
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(content.as_bytes()).unwrap();
+    path
+}
+
+#[allow(dead_code)]
+pub fn write_config_file(dir: &tempfile::TempDir, content: &str) -> PathBuf {
     let path = dir.path().join("config.toml");
     let mut f = std::fs::File::create(&path).unwrap();
     f.write_all(content.as_bytes()).unwrap();

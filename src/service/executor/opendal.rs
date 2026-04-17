@@ -138,3 +138,186 @@ fn default_gcloud_adc_path_exists() -> bool {
         .join("application_default_credentials.json");
     path.is_file()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn local_dest(path: &std::path::Path) -> DestSpec {
+        DestSpec {
+            backend_spec: BackendSpec::Local {
+                path: path.to_string_lossy().to_string(),
+            },
+        }
+    }
+
+    fn s3_dest(disable_config_load: bool) -> DestSpec {
+        DestSpec {
+            backend_spec: BackendSpec::S3 {
+                bucket: "bucket".to_string(),
+                path: "root".to_string(),
+                region: Some("ap-northeast-1".to_string()),
+                endpoint: Some("http://127.0.0.1:9000".to_string()),
+                access_key_id: Some("key".to_string()),
+                secret_access_key: Some("secret".to_string()),
+                session_token: None,
+                disable_config_load,
+            },
+        }
+    }
+
+    fn gcs_dest(with_credential_path: bool) -> DestSpec {
+        DestSpec {
+            backend_spec: BackendSpec::Gcs {
+                bucket: "bucket".to_string(),
+                path: "root".to_string(),
+                endpoint: Some("http://127.0.0.1:4443".to_string()),
+                credential_path: with_credential_path.then(|| "/tmp/fake-creds.json".to_string()),
+            },
+        }
+    }
+
+    #[test]
+    fn test_path_helpers_trim_slashes() {
+        assert_eq!(path_in_volume("/vol/", "/meta.yaml/"), "vol/meta.yaml");
+        assert_eq!(
+            path_in_snapshot("/vol/", "/snap/", "/part.zst/"),
+            "vol/snap/part.zst"
+        );
+    }
+
+    #[test]
+    fn test_default_gcloud_adc_path_exists_without_home() {
+        let _guard = env_lock().lock().unwrap();
+        let old_home = env::var_os("HOME");
+        unsafe {
+            env::remove_var("HOME");
+        }
+
+        assert!(!default_gcloud_adc_path_exists());
+
+        unsafe {
+            if let Some(home) = old_home {
+                env::set_var("HOME", home);
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_gcloud_adc_path_exists_with_adc_file() {
+        let _guard = env_lock().lock().unwrap();
+        let old_home = env::var_os("HOME");
+        let tmp = tempfile::tempdir().unwrap();
+        let adc_path = tmp
+            .path()
+            .join(".config")
+            .join("gcloud")
+            .join("application_default_credentials.json");
+        std::fs::create_dir_all(adc_path.parent().unwrap()).unwrap();
+        std::fs::write(&adc_path, "{}").unwrap();
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+
+        assert!(default_gcloud_adc_path_exists());
+
+        unsafe {
+            if let Some(home) = old_home {
+                env::set_var("HOME", home);
+            } else {
+                env::remove_var("HOME");
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_gcloud_adc_path_exists_without_adc_file() {
+        let _guard = env_lock().lock().unwrap();
+        let old_home = env::var_os("HOME");
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+
+        assert!(!default_gcloud_adc_path_exists());
+
+        unsafe {
+            if let Some(home) = old_home {
+                env::set_var("HOME", home);
+            } else {
+                env::remove_var("HOME");
+            }
+        }
+    }
+
+    #[test]
+    fn test_summon_operator_local_backend_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec = local_dest(tmp.path());
+        let op = summon_operator(&spec).unwrap();
+
+        let data = OPENDAL_RUNTIME.block_on(async {
+            op.write("vol/meta.yaml", "hello".as_bytes().to_vec())
+                .await?;
+            op.read("vol/meta.yaml").await
+        });
+
+        assert_eq!(String::from_utf8(data.unwrap().to_vec()).unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_summon_blocking_operator_local_backend_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec = local_dest(tmp.path());
+        let op = summon_blocking_operator(&spec).unwrap();
+
+        op.write("vol/meta.yaml", b"world".to_vec()).unwrap();
+        let data = op.read("vol/meta.yaml").unwrap();
+
+        assert_eq!(String::from_utf8(data.to_vec()).unwrap(), "world");
+    }
+
+    #[test]
+    fn test_summon_operator_builds_s3_operator_without_network_access() {
+        let op = summon_operator(&s3_dest(true)).unwrap();
+        let info = op.info();
+
+        assert_eq!(info.scheme(), "s3");
+    }
+
+    #[test]
+    fn test_summon_operator_builds_gcs_operator_without_network_access() {
+        let op = summon_operator(&gcs_dest(true)).unwrap();
+        let info = op.info();
+
+        assert_eq!(info.scheme(), "gcs");
+    }
+
+    #[test]
+    fn test_summon_operator_builds_gcs_operator_without_credential_path() {
+        let _guard = env_lock().lock().unwrap();
+        let old_home = env::var_os("HOME");
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+
+        let op = summon_operator(&gcs_dest(false)).unwrap();
+        let info = op.info();
+        assert_eq!(info.scheme(), "gcs");
+
+        unsafe {
+            if let Some(home) = old_home {
+                env::set_var("HOME", home);
+            } else {
+                env::remove_var("HOME");
+            }
+        }
+    }
+}
